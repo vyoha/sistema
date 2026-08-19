@@ -12065,6 +12065,55 @@ window.f7_enviarConfig = f7_enviarConfig;
 
 try { document.documentElement.setAttribute("data-f7c", "ativa"); } catch (e) {}
 
+
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 7d · O SERVIDOR CHEGA DEPOIS DO BOOT
+   A leitura da configuracao acontecia cedo demais: o aplicativo
+   termina de carregar o banco local depois dela, e o que veio do
+   servidor era sobrescrito. Na tela, a empresa parecia sem
+   configuracao mesmo tendo tudo gravado. Agora a leitura se
+   repete algumas vezes nos primeiros segundos — e so mescla
+   enquanto ninguem mexeu na configuracao nesta aba.
+   =============================================================== */
+function f7_intocada() {
+  var c = f7_configLocal();
+  if (!c) return true;
+  if (c.__sem_configuracao) return true;
+  if (!F7_ULTIMA) return true;
+  return JSON.stringify(c) === F7_ULTIMA;
+}
+
+function f7_reler(tentativa) {
+  if (!f7_ligada()) return;
+  if (!f7_intocada()) return;
+  f7_baixarConfig(function () {
+    try { aplicarMarca(); } catch (e) {}
+    try { if (typeof repintar === "function") repintar(); } catch (e) {}
+  });
+  if (tentativa < 3) {
+    setTimeout(function () { f7_reler(tentativa + 1); }, 4000);
+  }
+}
+
+f7_arrancar = function () {
+  if (!f7_ligada()) {
+    F7_TENTOU++;
+    if (F7_TENTOU < 240) { setTimeout(f7_arrancar, 1500); }
+    return;
+  }
+  f7_baixarConfig(function () {
+    try { if (typeof repintar === "function") repintar(); } catch (e) {}
+    try { aplicarMarca(); } catch (e) {}
+    try { document.documentElement.setAttribute("data-f7", "ativa"); } catch (e) {}
+  });
+  setTimeout(function () { f7_reler(1); }, 3500);
+};
+window.f7_arrancar = f7_arrancar;
+setTimeout(function () { f7_reler(1); }, 3000);
+
+try { document.documentElement.setAttribute("data-f7d", "ativa"); } catch (e) {}
+
 </script>
 </body>
 </html>
