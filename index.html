@@ -11819,6 +11819,53 @@ function painelCrediario() {
 
 arrancar("https://nxvyvrbgkxysycnaeova.supabase.co",
          "sb_publishable_d1acZQt5kyHr_bwfIfiRcA_jXGZWfUq");
+
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 5 · A MARCA NAO PODE SUMIR
+   Quando a empresa entra sem configuracao, cfg().cor vem vazio e
+   o --brand virava a string "undefined". Isso e uma cor invalida:
+   todo botao primario ficava transparente, sem texto visivel, e a
+   tela parecia quebrada. Aqui a cor cai para o padrao da Vyoha em
+   vez de sumir.
+   =============================================================== */
+var F5_COR_PADRAO = "#0e3e4a";
+
+function f5_corValida(c) {
+  return typeof c === "string" && /^#[0-9a-fA-F]{3,8}$/.test(String(c).trim());
+}
+
+function f5_garantirMarca() {
+  try {
+    var r = document.documentElement;
+    var atual = String(r.style.getPropertyValue("--brand") || "").trim();
+    if (f5_corValida(atual)) return;
+    r.style.setProperty("--brand", F5_COR_PADRAO);
+    r.style.setProperty("--brand-2", "#39616b");
+    r.style.setProperty("--brand-3", "#0a2b34");
+    r.style.setProperty("--brand-soft", "#ecf0f1");
+    r.style.setProperty("--brand-line", "#c0cdd0");
+  } catch (e) {}
+}
+
+if (typeof aplicarMarca === "function") {
+  var f5_aplicarMarcaAntiga = aplicarMarca;
+  aplicarMarca = function () {
+    try { f5_aplicarMarcaAntiga.apply(this, arguments); } catch (e) {}
+    f5_garantirMarca();
+  };
+  window.aplicarMarca = aplicarMarca;
+}
+
+f5_garantirMarca();
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", f5_garantirMarca);
+} else {
+  setTimeout(f5_garantirMarca, 0);
+}
+setTimeout(f5_garantirMarca, 1500);
+try { document.documentElement.setAttribute("data-f5-marca", "ativa"); } catch (e) {}
+
 </script>
 </body>
 </html>
