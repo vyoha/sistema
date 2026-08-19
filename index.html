@@ -12114,6 +12114,36 @@ setTimeout(function () { f7_reler(1); }, 3000);
 
 try { document.documentElement.setAttribute("data-f7d", "ativa"); } catch (e) {}
 
+
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 7e · QUEM MANDA NA MARCA DE CONFIGURADA
+   O boot cria a linha local a partir do modelo vazio, que vem
+   marcado como __sem_configuracao. A leitura do servidor mesclava
+   os campos por cima, mas nao tirava essa marca — e a empresa, ja
+   configurada, continuava vendo os "Primeiros passos". A copia do
+   servidor passa a mandar tambem nisso.
+   =============================================================== */
+var f7_baixarAntigo = f7_baixarConfig;
+f7_baixarConfig = function (depois) {
+  f7_baixarAntigo(function (ok) {
+    try {
+      if (ok) {
+        var c = f7_configLocal();
+        if (c && c.__sem_configuracao && (c.cor || c.sigla || c.assinatura)) {
+          delete c.__sem_configuracao;
+          F7_ULTIMA = JSON.stringify(c);
+          try { f7_saveAntigo(); } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    if (depois) depois(ok);
+  });
+};
+window.f7_baixarConfig = f7_baixarConfig;
+
+try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
+
 </script>
 </body>
 </html>
