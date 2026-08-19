@@ -12024,6 +12024,47 @@ if (typeof removerLogo === "function") { removerLogo = window.removerLogo; }
 
 try { document.documentElement.setAttribute("data-f7b", "ativa"); } catch (e) {}
 
+
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 7c · O VAZIO NAO SOBE
+
+   Achado no teste de recarga: se o cache local fosse esvaziado —
+   por limpeza de dados do navegador, por outra aba, por qualquer
+   motivo — a camada da fase 7 mandava esse vazio para o servidor
+   e a empresa perdia a configuracao em todos os computadores.
+   Apagar aqui apagava la.
+
+   Agora vale a regra simples: configuracao ainda nao definida
+   (__sem_configuracao) nunca sobe. Empresa que nunca configurou
+   nao tem o que gravar; empresa que ja configurou nao perde o que
+   tem por causa de um cache limpo.
+   =============================================================== */
+f7_enviarConfig = function () {
+  if (!F7_BAIXOU) return;
+  if (!f7_ligada() || !f7_gestor()) return;
+  var c = f7_configLocal();
+  if (!c) return;
+  if (c.__sem_configuracao) return;
+  var agora = JSON.stringify(c);
+  if (agora === F7_ULTIMA) return;
+  var cli = f7_cliente();
+  if (!cli) return;
+  var anterior = F7_ULTIMA;
+  F7_ULTIMA = agora;
+  try {
+    cli.rpc("salvar_minha_config", { p_dados: JSON.parse(agora) })
+      .then(function (r) {
+        var d = (r && r.data) || {};
+        if (d.erro) { F7_ULTIMA = anterior; }
+      })
+      .catch(function () { F7_ULTIMA = anterior; });
+  } catch (e) { F7_ULTIMA = anterior; }
+};
+window.f7_enviarConfig = f7_enviarConfig;
+
+try { document.documentElement.setAttribute("data-f7c", "ativa"); } catch (e) {}
+
 </script>
 </body>
 </html>
