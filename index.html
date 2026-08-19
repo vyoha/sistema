@@ -12145,5 +12145,329 @@ window.f7_baixarConfig = f7_baixarConfig;
 try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 
 </script>
+
+<script>
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 9 · AVISO LEGAL
+
+   Duas coisas, e so isso:
+   · na tela de acesso, uma linha discreta dizendo que entrar
+     significa concordar com os Termos e conhecer a Politica;
+   · no rodape do menu lateral, os dois links, sem chamar atencao.
+
+   Nada aqui reescreve marcacao existente. Tudo e acrescimo:
+   se esta camada nao rodar, o sistema continua igual ao que era.
+   =============================================================== */
+(function () {
+  var CSS =
+    ".f9-aviso{margin-top:26px;padding-top:16px;border-top:1px solid var(--line,#e6eaed);" +
+    "font-size:12.5px;line-height:1.65;color:var(--ink-3,#86959d);max-width:46ch}" +
+    ".f9-aviso a{color:var(--brand-2,#1a5c80);text-decoration:none;border-bottom:1px solid rgba(26,92,128,.28)}" +
+    ".f9-aviso a:hover{border-bottom-color:var(--brand-2,#1a5c80)}" +
+    ".f9-rodape{padding:0 22px 18px;margin-top:-6px;font-size:11px;color:var(--ink-3,#86959d);" +
+    "display:flex;gap:7px;flex-wrap:wrap;align-items:center;letter-spacing:.2px}" +
+    ".f9-rodape a{color:var(--ink-3,#86959d);text-decoration:none}" +
+    ".f9-rodape a:hover{color:var(--ink-2,#485b64);text-decoration:underline}" +
+    "@media(max-width:640px){.f9-aviso{max-width:none;font-size:12px}}";
+
+  var TERMOS = "termos-de-uso.html";
+  var PRIVAC = "politica-de-privacidade.html";
+
+  function estilo() {
+    if (document.getElementById("f9-css")) { return; }
+    var t = document.createElement("style");
+    t.id = "f9-css";
+    t.textContent = CSS;
+    (document.head || document.documentElement).appendChild(t);
+  }
+
+  function link(href, texto) {
+    return '<a href="' + href + '" target="_blank" rel="noopener">' + texto + "</a>";
+  }
+
+  /* a tela de acesso: o lado esquerdo some abaixo de 1000px,
+     entao o aviso mora no lado do formulario, que sempre aparece */
+  function aviso() {
+    if (document.getElementById("f9-aviso")) { return; }
+    var alvo = document.querySelector("#login .lg-form");
+    if (!alvo) { return; }
+    var d = document.createElement("div");
+    d.id = "f9-aviso";
+    d.className = "f9-aviso";
+    d.innerHTML =
+      "Ao acessar o Vyoha System, você concorda com os " + link(TERMOS, "Termos de Uso") +
+      " e está ciente da " + link(PRIVAC, "Política de Privacidade") + ".";
+    alvo.appendChild(d);
+  }
+
+  /* o rodape do menu lateral: discreto, embaixo do selo */
+  function rodape() {
+    if (document.getElementById("f9-rodape")) { return; }
+    var nav = document.getElementById("nav");
+    if (!nav) { return; }
+    var d = document.createElement("div");
+    d.id = "f9-rodape";
+    d.className = "f9-rodape";
+    d.innerHTML = link(TERMOS, "Termos de Uso") + "<span>·</span>" + link(PRIVAC, "Privacidade");
+    nav.appendChild(d);
+  }
+
+  function f9() {
+    try { estilo(); } catch (e) {}
+    try { aviso(); } catch (e) {}
+    try { rodape(); } catch (e) {}
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", f9);
+  } else {
+    f9();
+  }
+  setTimeout(f9, 900);
+  setTimeout(f9, 3000);
+
+  try { document.documentElement.setAttribute("data-f9", "ativa"); } catch (e) {}
+})();
+
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 10 · A EQUIPE NASCE NO SERVIDOR
+
+   O que estava errado nesta tela, e por que:
+
+   1. Criar acesso chamava a Edge Function `criar-acesso` e
+      mandava para ela uma senha inventada AQUI:
+         "vy" + Math.floor(Math.random() * 9000 + 1000)
+      Quatro digitos, sorteados pelo navegador, viajando pela
+      rede. A senha tem que nascer no servidor — e agora nasce.
+
+   2. Nao havia caminho nenhum para o administrador redefinir a
+      senha de alguem da propria equipe. Toda senha esquecida
+      virava chamado para a Vyoha.
+
+   Agora as duas coisas passam por funcao de banco, com porteiro:
+     · equipe_criar_acesso()    — cria admin ou vendedor, na
+                                  propria empresa, e devolve a
+                                  senha temporaria uma vez
+     · equipe_redefinir_senha() — troca a senha de quem e da
+                                  empresa, e obriga nova troca
+
+   A empresa nunca vai daqui: o servidor le meu_tenant().
+   A senha nunca fica gravada: some ao recarregar a pagina.
+   =============================================================== */
+(function () {
+
+  var PROV = {};   /* senha temporaria, so em memoria desta aba */
+
+  function cli()  { try { return Sessao.conexao(); } catch (e) { return null; } }
+  function val(i) { var e = document.getElementById(i); return e ? String(e.value || "").trim() : ""; }
+  function elx(i) { return document.getElementById(i); }
+  function seguro(t) {
+    try { return esc(t); } catch (e) { return String(t == null ? "" : t).replace(/[<>&"]/g, ""); }
+  }
+  function aviso(m, k) { try { toast(m, k || "err"); } catch (e) {} }
+
+  /* ------------------------------------------------------------
+     a senha aparece uma vez, e so aqui
+     ------------------------------------------------------------ */
+  function f10_modalSenha(d) {
+    var senha = PROV[d.user_id || d.email] || "";
+    var corpo =
+      '<div style="background:#fff8e6;border:1px solid #f0d9ae;border-left:3px solid #d98c00;' +
+      'border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:14px;line-height:1.6">' +
+      'Passe estes dados para a pessoa. A <b>senha e temporaria</b>: no primeiro acesso o sistema ' +
+      'obriga a trocar, e depois disso ninguem mais ve a senha dela — nem voce, nem a Vyoha.' +
+      '</div>' +
+      '<div class="ln"><span class="k">Token da empresa</span><span class="v mono">' +
+        seguro(window.__env_token || "—") + '</span></div>' +
+      '<div class="ln"><span class="k">E-mail</span><span class="v">' + seguro(d.email) + '</span></div>' +
+      '<div class="ln"><span class="k">Senha temporaria</span><span class="v mono" id="f10-senha">' +
+        (senha ? seguro(senha) : "ja nao esta disponivel") + '</span></div>';
+
+    if (!senha) {
+      corpo += '<div style="background:#f1f4f5;border:1px solid #e6eaed;border-radius:10px;' +
+        'padding:13px 15px;margin-top:14px;font-size:13.5px;line-height:1.6;color:#485b64">' +
+        'Esta senha so aparece no momento em que e gerada. Se ela se perdeu, use ' +
+        '<b>Redefinir senha</b> para gerar outra.</div>';
+    }
+
+    var rodape = (senha
+      ? '<button class="btn" onclick="f10_copiar()">Copiar senha</button>'
+      : '') + '<button class="btn btn-p" onclick="fecharModal()">Entendi</button>';
+
+    try { modal("Acesso de " + (d.nome || d.email), corpo, rodape); }
+    catch (e) { aviso("Senha temporaria: " + senha, "ok"); }
+  }
+
+  window.f10_copiar = function () {
+    var e = elx("f10-senha");
+    if (!e) return;
+    try {
+      navigator.clipboard.writeText(e.textContent).then(
+        function () { aviso("Senha copiada.", "ok"); },
+        function () { aviso("Copie a senha manualmente.", "err"); });
+    } catch (x) { aviso("Copie a senha manualmente.", "err"); }
+  };
+
+  /* ------------------------------------------------------------
+     criar acesso — agora pelo banco, nao pela Edge Function
+     ------------------------------------------------------------ */
+  var salvarAntigo = window.salvarUsuario;
+
+  window.salvarUsuario = function (id) {
+    /* editar continua exatamente como estava: gerir_perfil */
+    if (id) { return salvarAntigo.apply(this, arguments); }
+
+    var nome  = val("u-nome");
+    var mail  = val("u-mail").toLowerCase();
+    var papel = val("u-perfil") || "vendedor";
+    var cargo = val("u-cargo");
+    var err   = elx("u-err");
+    var botao = elx("u-btn");
+
+    function ruim(m) {
+      if (botao) { botao.disabled = false; botao.textContent = "Salvar"; }
+      if (!err) { aviso(m, "err"); return; }
+      var ic = ""; try { ic = ICON.alert; } catch (e) {}
+      err.innerHTML = "<span style='width:17px'>" + ic + "</span><div>" + seguro(m) + "</div>";
+      err.classList.remove("hidden");
+    }
+
+    if (nome.length < 3)        { return ruim("Informe o nome."); }
+    if (mail.indexOf("@") < 0)  { return ruim("E-mail invalido."); }
+
+    var c = cli();
+    if (!c) { return ruim("Nao consegui falar com o servidor."); }
+
+    if (botao) { botao.disabled = true; botao.textContent = "Criando…"; }
+
+    c.rpc("equipe_criar_acesso", {
+      p_email:  mail,
+      p_nome:   nome,
+      p_perfil: papel,
+      p_cargo:  cargo || null
+    }).then(function (r) {
+      if (botao) { botao.disabled = false; botao.textContent = "Salvar"; }
+      if (r.error) { return ruim(r.error.message || "Nao consegui criar o acesso."); }
+      var d = r.data || {};
+      if (d.erro)  { return ruim(d.erro); }
+      if (!d.ok)   { return ruim("O servidor nao confirmou a criacao."); }
+
+      PROV[d.user_id] = d.senha_temporaria;
+      d.senha_temporaria = null;          /* nao anda mais junto do objeto */
+      if (err) { err.classList.add("hidden"); }
+      try { logar("Usuario criado", nome); } catch (e) {}
+
+      var seguir = function () {
+        try { fecharModal(); } catch (e) {}
+        aviso("Acesso criado. A pessoa ja pode entrar de qualquer computador.", "ok");
+        f10_modalSenha({ user_id: d.user_id, email: d.email, nome: nome });
+        try { ir(View.pg, View.p); } catch (e) {}
+      };
+      try { carregarEquipe().then(seguir, seguir); } catch (e) { seguir(); }
+    }).catch(function () {
+      ruim("Nao consegui falar com o servidor.");
+    });
+  };
+
+  /* ------------------------------------------------------------
+     redefinir a senha de alguem da equipe
+     ------------------------------------------------------------ */
+  window.redefinirSenhaUsuario = function (id) {
+    var u = ((window.DB && DB.users) || []).filter(function (x) { return x.id === id; })[0] || {};
+    var quem = u.nome || u.email || "esta pessoa";
+
+    function agora() {
+      var c = cli();
+      if (!c) { return aviso("Nao consegui falar com o servidor.", "err"); }
+      c.rpc("equipe_redefinir_senha", { alvo: id }).then(function (r) {
+        if (r.error) { return aviso(r.error.message || "Nao consegui redefinir.", "err"); }
+        var d = r.data || {};
+        if (d.erro) { return aviso(d.erro, "err"); }
+        PROV[id] = d.senha_temporaria;
+        d.senha_temporaria = null;
+        try { logar("Senha redefinida", quem); } catch (e) {}
+        var seguir = function () {
+          try { fecharModal(); } catch (e) {}
+          f10_modalSenha({ user_id: id, email: d.email || u.email, nome: quem });
+          try { ir(View.pg, View.p); } catch (e) {}
+        };
+        try { carregarEquipe().then(seguir, seguir); } catch (e) { seguir(); }
+      }).catch(function () { aviso("Nao consegui falar com o servidor.", "err"); });
+    }
+
+    try {
+      confirmar("Redefinir a senha de " + quem,
+        "A senha atual deixa de valer na hora. O sistema gera uma senha temporaria, " +
+        "que aparece uma unica vez, e obriga a pessoa a trocar no primeiro acesso.",
+        agora, "Redefinir senha");
+    } catch (e) { agora(); }
+  };
+
+  /* ------------------------------------------------------------
+     o botao de redefinir, dentro do modal de edicao
+
+     A tela de Equipe e desenhada pelo vapp. Em vez de reescrever
+     o desenho dela, esta camada espera o modal de edicao abrir e
+     acrescenta o botao no rodape. Se o modal mudar de forma, o
+     botao simplesmente nao aparece — nada quebra.
+     ------------------------------------------------------------ */
+  function enxertarBotao(no) {
+    try {
+      if (!no || !no.querySelector) { return; }
+      if (!no.querySelector("#u-nome")) { return; }
+      /* a senha nao nasce mais no navegador: o campo sai da tela */
+      var cs = no.querySelector("#u-senha");
+      if (cs && cs.parentNode) {
+        cs.parentNode.style.display = "none";
+        cs.value = "";
+      }
+
+      var rod = no.querySelector(".md-f");
+      if (!rod || rod.querySelector("[data-f10]")) { return; }
+
+      /* o id de quem esta sendo editado vive no onclick do salvar */
+      var alvo = null;
+      var bs = rod.querySelectorAll("button");
+      for (var i = 0; i < bs.length; i++) {
+        var oc = bs[i].getAttribute("onclick") || "";
+        var m = oc.match(/salvarUsuario\(\s*['"]([^'"]+)['"]\s*\)/);
+        if (m) { alvo = m[1]; break; }
+      }
+      if (!alvo) { return; }                       /* criando, nao editando */
+      try {
+        var eu = Sessao.quem ? Sessao.quem() : null;
+        if (eu && (eu.id === alvo || eu.user_id === alvo)) { return; }
+      } catch (e) {}
+
+      var b = document.createElement("button");
+      b.className = "btn";
+      b.setAttribute("data-f10", "1");
+      b.textContent = "Redefinir senha";
+      b.onclick = function () { redefinirSenhaUsuario(alvo); };
+      rod.insertBefore(b, rod.firstChild);
+    } catch (e) {}
+  }
+
+  function ligarObservador() {
+    var raiz = elx("md-root");
+    if (!raiz) { return setTimeout(ligarObservador, 1200); }
+    try {
+      new MutationObserver(function (regs) {
+        for (var i = 0; i < regs.length; i++) {
+          for (var j = 0; j < regs[i].addedNodes.length; j++) {
+            enxertarBotao(regs[i].addedNodes[j]);
+          }
+        }
+      }).observe(raiz, { childList: true });
+    } catch (e) {}
+  }
+  ligarObservador();
+
+  try { document.documentElement.setAttribute("data-f10", "ativa"); } catch (e) {}
+})();
+
+</script>
 </body>
 </html>
