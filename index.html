@@ -11971,6 +11971,59 @@ function f7_arrancar() {
 setTimeout(f7_arrancar, 1200);
 try { document.documentElement.setAttribute("data-f7", "carregada"); } catch (e) {}
 
+
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 7b · EMPRESA NOVA CONSEGUE SE CONFIGURAR
+
+   Achado no teste da fase 7: cfg() devolvia, para empresa sem
+   configuracao, um objeto avulso — marcado com __sem_configuracao
+   e fora de DB.config. Quem clicava em "Aplicar identidade"
+   escrevia nesse objeto solto: nada era gravado, nem aqui nem no
+   servidor, e nenhuma mensagem de erro aparecia.
+
+   Agora cfg() materializa a linha na primeira vez que e pedida,
+   mantendo a marca __sem_configuracao ate a empresa realmente
+   salvar — para os "Primeiros passos" nao se darem por prontos
+   sozinhos.
+   =============================================================== */
+var f7_cfgAntigo = cfg;
+cfg = function () {
+  var emp = f7_empresa();
+  var achado = f7_configLocal();
+  if (achado) return achado;
+  var base = f7_cfgAntigo.apply(this, arguments) || {};
+  if (!emp) return base;
+  var novo = {};
+  Object.keys(base).forEach(function (k) { novo[k] = base[k]; });
+  novo.tenant_id = emp;
+  DB.config = DB.config || [];
+  DB.config.push(novo);
+  return novo;
+};
+window.cfg = cfg;
+
+function f7_marcarConfigurada() {
+  var c = f7_configLocal();
+  if (c && c.__sem_configuracao) { delete c.__sem_configuracao; }
+}
+
+["salvarVisual", "salvarEmpresa", "subirLogo", "removerLogo"].forEach(function (nome) {
+  if (typeof window[nome] !== "function") return;
+  var antigo = window[nome];
+  window[nome] = function () {
+    var r = antigo.apply(this, arguments);
+    try { f7_marcarConfigurada(); f7_saveAntigo(); f7_agendarEnvio(); } catch (e) {}
+    return r;
+  };
+});
+if (typeof salvarVisual === "function") { salvarVisual = window.salvarVisual; }
+if (typeof salvarEmpresa === "function") { salvarEmpresa = window.salvarEmpresa; }
+if (typeof subirLogo === "function") { subirLogo = window.subirLogo; }
+if (typeof removerLogo === "function") { removerLogo = window.removerLogo; }
+
+try { document.documentElement.setAttribute("data-f7b", "ativa"); } catch (e) {}
+
 </script>
 </body>
 </html>
