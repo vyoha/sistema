@@ -11866,6 +11866,111 @@ if (document.readyState === "loading") {
 setTimeout(f5_garantirMarca, 1500);
 try { document.documentElement.setAttribute("data-f5-marca", "ativa"); } catch (e) {}
 
+
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 7 · A CONFIGURACAO DA EMPRESA SAI DAQUI
+   Cor, sigla, assinatura, juros, multa, meta, comissao, estoque
+   minimo e link de pagamento viviam so no localStorage deste
+   computador. Agora moram no servidor, em public.config, e este
+   navegador e so uma copia de tela: ao abrir, o servidor manda;
+   a cada save(), o que mudou sobe. Quem grava e o administrador
+   da empresa — o servidor confere.
+   =============================================================== */
+var F7_ULTIMA = null;
+var F7_TIMER  = null;
+var F7_BAIXOU = false;
+var F7_TENTOU = 0;
+
+function f7_cliente()  { try { return Sessao.conexao(); } catch (e) { return null; } }
+function f7_ligada()   { try { return !!(Sessao.ligada && Sessao.ligada()); } catch (e) { return false; } }
+function f7_gestor()   { try { return !!(Sessao.souGestor && Sessao.souGestor()); } catch (e) { return false; } }
+function f7_empresa()  { try { return (Sessao.empresa && Sessao.empresa()) || null; } catch (e) { return null; } }
+
+function f7_configLocal() {
+  var emp = f7_empresa();
+  var lista = DB.config || [];
+  var c = lista.filter(function (x) { return !emp || x.tenant_id === emp; })[0];
+  return c || null;
+}
+
+function f7_baixarConfig(depois) {
+  var cli = f7_cliente();
+  if (!cli || !f7_ligada()) { if (depois) depois(false); return; }
+  try {
+    cli.rpc("minha_config").then(function (r) {
+      var d = (r && r.data) || null;
+      if (!d || d.erro || typeof d !== "object" || !Object.keys(d).length) {
+        F7_BAIXOU = true;
+        if (depois) depois(false);
+        return;
+      }
+      var emp = f7_empresa();
+      if (emp) d.tenant_id = emp;
+      var atual = f7_configLocal();
+      if (atual) {
+        Object.keys(d).forEach(function (k) { atual[k] = d[k]; });
+      } else {
+        DB.config = DB.config || [];
+        DB.config.push(d);
+      }
+      F7_ULTIMA = JSON.stringify(f7_configLocal());
+      F7_BAIXOU = true;
+      try { f7_saveAntigo(); } catch (e) {}
+      try { aplicarMarca(); } catch (e) {}
+      if (depois) depois(true);
+    }).catch(function () { if (depois) depois(false); });
+  } catch (e) { if (depois) depois(false); }
+}
+
+function f7_enviarConfig() {
+  if (!F7_BAIXOU) return;
+  if (!f7_ligada() || !f7_gestor()) return;
+  var c = f7_configLocal();
+  if (!c) return;
+  var agora = JSON.stringify(c);
+  if (agora === F7_ULTIMA) return;
+  var cli = f7_cliente();
+  if (!cli) return;
+  var anterior = F7_ULTIMA;
+  F7_ULTIMA = agora;
+  try {
+    cli.rpc("salvar_minha_config", { p_dados: JSON.parse(agora) })
+      .then(function (r) {
+        var d = (r && r.data) || {};
+        if (d.erro) { F7_ULTIMA = anterior; }
+      })
+      .catch(function () { F7_ULTIMA = anterior; });
+  } catch (e) { F7_ULTIMA = anterior; }
+}
+
+function f7_agendarEnvio() {
+  if (F7_TIMER) { clearTimeout(F7_TIMER); }
+  F7_TIMER = setTimeout(function () { F7_TIMER = null; f7_enviarConfig(); }, 1200);
+}
+
+var f7_saveAntigo = save;
+save = function () {
+  var r = f7_saveAntigo.apply(this, arguments);
+  try { f7_agendarEnvio(); } catch (e) {}
+  return r;
+};
+window.save = save;
+
+function f7_arrancar() {
+  if (!f7_ligada()) {
+    F7_TENTOU++;
+    if (F7_TENTOU < 240) { setTimeout(f7_arrancar, 1500); }
+    return;
+  }
+  f7_baixarConfig(function () {
+    try { if (typeof repintar === "function") repintar(); } catch (e) {}
+    try { document.documentElement.setAttribute("data-f7", "ativa"); } catch (e) {}
+  });
+}
+setTimeout(f7_arrancar, 1200);
+try { document.documentElement.setAttribute("data-f7", "carregada"); } catch (e) {}
+
 </script>
 </body>
 </html>
