@@ -12469,5 +12469,831 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 })();
 
 </script>
+
+<script>
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 11 · A PONTE QUE FALTAVA: Sess
+
+   O QUE ESTAVA QUEBRADO
+
+   A fase 4 tirou o login do navegador e levou para o servidor.
+   T(), perfil() e me() foram reescritas para perguntar ao
+   Sessao — e isso funcionou.
+
+   Mas 32 pontos do vapp.js nao chamam essas funcoes: leem a
+   variavel global `Sess` DIRETO. E `Sess` so era preenchida
+   pelo login antigo, que deixou de existir. Resultado: `Sess`
+   ficou `null` e cada um desses 32 pontos estoura na hora do
+   clique com "Cannot read properties of null".
+
+   Sao eles, entre outros:
+     salvarCobranca, salvarNegociacao, salvarBloqueio, logar,
+     salvarCliente, salvarProduto, salvarMov, salvarLanc,
+     salvarProLabore, salvarMeta, registrarRestricao,
+     revogarRestricao, agendarVisita, confirmarFrete,
+     marcarEntregue, e a tela de Equipe.
+
+   Ou seja: venda, cliente, produto, estoque, financeiro,
+   cobranca, acordo e visita — todos os fluxos criticos.
+
+   A CORRECAO
+
+   Nao sao 32 correcoes. E uma: `Sess` volta a existir, com o
+   conteudo vindo do servidor, nunca do localStorage. Quem le
+   `Sess.user_id` continua lendo a mesma coisa — o que muda e
+   de onde ela vem.
+
+   Formato preservado de proposito: { tenant_id, user_id, inicio }
+   e o que o codigo antigo espera encontrar.
+   =============================================================== */
+(function () {
+
+  var F11_INICIO = null;
+
+  function f11_quem() {
+    try { return (typeof Sessao !== "undefined" && Sessao.quem) ? Sessao.quem() : null; }
+    catch (e) { return null; }
+  }
+
+  /* alinha `Sess` com o que o servidor diz. Barato: so escreve
+     quando muda de pessoa ou de empresa. */
+  function f11_alinhar() {
+    var q = f11_quem();
+
+    if (q && q.user_id) {
+      if (!Sess || Sess.user_id !== q.user_id || Sess.tenant_id !== q.tenant_id) {
+        if (!F11_INICIO) { F11_INICIO = new Date().toISOString(); }
+        Sess = { tenant_id: q.tenant_id, user_id: q.user_id, inicio: F11_INICIO };
+        try { window.Sess = Sess; } catch (e) {}
+        try { document.documentElement.setAttribute("data-f11", "ligada"); } catch (e) {}
+      }
+      return true;
+    }
+
+    /* saiu: `Sess` some junto, senao a tela seguinte carrega com
+       a identidade de quem acabou de sair */
+    if (Sess) {
+      Sess = null;
+      F11_INICIO = null;
+      try { window.Sess = null; } catch (e) {}
+    }
+    return false;
+  }
+
+  /* toda troca de tela alinha antes de desenhar */
+  if (typeof ir === "function") {
+    var irAntigo = ir;
+    ir = function () {
+      try { f11_alinhar(); } catch (e) {}
+      return irAntigo.apply(this, arguments);
+    };
+    try { window.ir = ir; } catch (e) {}
+  }
+
+  /* toda gravacao alinha antes de gravar: e o clique que le
+     Sess.user_id, e ele pode vir sem passar por ir() */
+  if (typeof save === "function") {
+    var saveAntigo = save;
+    save = function () {
+      try { f11_alinhar(); } catch (e) {}
+      return saveAntigo.apply(this, arguments);
+    };
+    try { window.save = save; } catch (e) {}
+  }
+
+  /* rede de seguranca: enquanto a sessao nao sobe, tenta;
+     depois vira uma conferencia rala, so para nao ficar velho */
+  var f11_tentativas = 0;
+  (function f11_arrancar() {
+    if (f11_alinhar()) {
+      setInterval(f11_alinhar, 4000);
+      return;
+    }
+    f11_tentativas++;
+    if (f11_tentativas < 240) { setTimeout(f11_arrancar, 1000); }
+  })();
+
+
+  /* ---------------------------------------------------------------
+     DOIS BOTOES DA TELA DE EQUIPE QUE AINDA ERAM DO SISTEMA ANTIGO
+
+     A tela chama toggleUser() e novaSenhaTemporaria(). As duas
+     mexiam no localStorage e chamavam o mecanismo de nuvem que
+     nao existe mais. As versoes de servidor ja existem — o que
+     faltava era a tela apontar para elas.
+     --------------------------------------------------------------- */
+
+  if (typeof alternarUsuario === "function") {
+    toggleUser = function (id) {
+      var u = ((window.DB && DB.users) || []).filter(function (x) { return x.id === id; })[0];
+      var ativo = !!(u && u.status === "ativo");
+      return alternarUsuario(id, !ativo);
+    };
+    try { window.toggleUser = toggleUser; } catch (e) {}
+  }
+
+  if (typeof redefinirSenhaUsuario === "function") {
+    novaSenhaTemporaria = function (id) { return redefinirSenhaUsuario(id); };
+    try { window.novaSenhaTemporaria = novaSenhaTemporaria; } catch (e) {}
+  }
+
+  /* a senha temporaria nao mora mais em lugar nenhum: nem no
+     banco local, nem no perfil. Quem devolvia u.provisoria
+     devolve nada. */
+  credencialPendente = function () { return null; };
+  try { window.credencialPendente = credencialPendente; } catch (e) {}
+
+  try { document.documentElement.setAttribute("data-f11", "carregada"); } catch (e) {}
+})();
+
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 12 · A TRANCA DO DUPLO CLIQUE
+
+   O QUE A AUDITORIA ACHOU
+
+   Sete gravacoes passam por funcao transacional no servidor.
+   Tres estavam protegidas de verdade — venda, recebimento e
+   acordo — porque guardavam a chave numa variavel e a
+   reaproveitavam na segunda tentativa.
+
+   As outras quatro nao estavam:
+
+     movimentar_estoque  sem chave nenhuma, e sem nem desabilitar
+                         o botao enquanto o servidor responde
+     salvar_produto      sem chave nenhuma
+     cancelar_venda      Dados.novaChave() DENTRO do clique
+     estornar_parcela    Dados.novaChave() DENTRO do clique
+
+   Chave sorteada dentro do clique nao protege nada: dois cliques
+   sorteiam duas chaves, e o servidor ve duas operacoes legitimas.
+
+   COMO ESTA CAMADA RESOLVE
+
+   Nao reescreve as quatro telas. A chave passa a nascer com o
+   MODAL, nao com o clique:
+
+     abriu o modal  → nasce uma chave
+     clicou 3 vezes → as tres levam a MESMA chave
+     fechou e abriu → nasce outra chave
+
+   Que e exatamente o que "uma intencao de operacao" significa.
+
+   Se nenhum modal estiver aberto, nenhuma chave e mandada — e o
+   servidor responde como respondia antes. Nada quebra.
+   =============================================================== */
+(function () {
+
+  /* uma chave por modal aberto */
+  var F12_CHAVES = {};
+
+  function f12_uuid() {
+    try { if (crypto && crypto.randomUUID) { return crypto.randomUUID(); } } catch (e) {}
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+      var r = Math.random() * 16 | 0;
+      return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+
+  /* a chave do modal que esta por cima */
+  function f12_chaveAtual() {
+    try {
+      if (!window.MDS || !MDS.length) { return null; }
+      var id = MDS[MDS.length - 1];
+      if (!F12_CHAVES[id]) { F12_CHAVES[id] = f12_uuid(); }
+      return F12_CHAVES[id];
+    } catch (e) { return null; }
+  }
+
+  if (typeof modal === "function") {
+    var modalAntigo = modal;
+    modal = function () {
+      var id = modalAntigo.apply(this, arguments);
+      try { F12_CHAVES[id] = f12_uuid(); } catch (e) {}
+      return id;
+    };
+    try { window.modal = modal; } catch (e) {}
+  }
+
+  if (typeof fecharModal === "function") {
+    var fecharAntigo = fecharModal;
+    fecharModal = function () {
+      var id = null;
+      try { id = (window.MDS && MDS.length) ? MDS[MDS.length - 1] : null; } catch (e) {}
+      var r = fecharAntigo.apply(this, arguments);
+      try { if (id) { delete F12_CHAVES[id]; } } catch (e) {}
+      return r;
+    };
+    try { window.fecharModal = fecharModal; } catch (e) {}
+  }
+
+  /* ---------------------------------------------------------------
+     onde a chave entra em cada uma das quatro
+
+     O servidor aceita as duas formas: com chave e sem. Por isso
+     esta camada pode subir depois do banco, sem combinar horario.
+     --------------------------------------------------------------- */
+  var ONDE = {
+    movimentar_estoque: function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
+    salvar_produto:     function (a, k) { if (a && a.produto) { a.produto.chave_tentativa = k; } },
+    estornar_parcela:   function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
+    cancelar_venda:     function (a, k) { if (a)              { a.chave                   = k; } }
+  };
+
+  if (window.Dados && typeof Dados.chamar === "function") {
+    var chamarAntigo = Dados.chamar;
+    Dados.chamar = function (funcao, argumentos) {
+      try {
+        var por = ONDE[funcao];
+        if (por) {
+          var k = f12_chaveAtual();
+          if (k) { por(argumentos, k); }
+        }
+      } catch (e) {}
+      return chamarAntigo.call(Dados, funcao, argumentos);
+    };
+  }
+
+  /* ---------------------------------------------------------------
+     o botao do estoque, que nem se desabilitava
+
+     A tranca do servidor ja impede o estrago. Isto e so para a
+     pessoa nao ficar clicando sem retorno nenhum na tela.
+     --------------------------------------------------------------- */
+  if (typeof salvarMov === "function") {
+    var movAntigo = salvarMov;
+    salvarMov = function () {
+      var b = null;
+      try {
+        var raiz = document.getElementById("md-root");
+        var cand = raiz ? raiz.querySelectorAll(".md-f .btn-p, .md-f .btn.btn-p") : [];
+        b = cand.length ? cand[cand.length - 1] : null;
+        if (b && !b.disabled) {
+          b.disabled = true;
+          var texto = b.textContent;
+          b.textContent = "Salvando…";
+          setTimeout(function () {
+            try { b.disabled = false; b.textContent = texto; } catch (e) {}
+          }, 6000);
+        }
+      } catch (e) {}
+      return movAntigo.apply(this, arguments);
+    };
+    try { window.salvarMov = salvarMov; } catch (e) {}
+  }
+
+  try { document.documentElement.setAttribute("data-f12", "ativa"); } catch (e) {}
+})();
+
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 14 · O LINK DA LOJA VOLTA A FUNCIONAR
+
+   O QUE ESTAVA QUEBRADO
+
+   "Gerar o link da loja" nao gerava nada. O caminho era:
+
+     criarLinkLoja → SYNC.ligado? nao → religarNuvem → desligada
+     pela fase 4 → devolve undefined → toast de erro, ou silencio
+
+   E mesmo se passasse, a gravacao ia por `nuvemPedido`, o REST
+   antigo que a fase 4 fechou de proposito porque apontava para
+   producao com o mecanismo errado.
+
+   Tres funcoes dependiam desse caminho:
+
+     buscarLinkLoja            le o link que ja existe
+     criarLinkLoja             cria o link
+     atualizarLinkPagamentoNuvem  mantem nome, sigla, whatsapp e
+                               link de pagamento em dia na pagina
+                               publica
+
+   O QUE MUDA
+
+   Nada de arquitetura nova. A tabela `public.formularios` ja
+   existe, ja tem RLS e ja da select/insert/update para quem tem
+   login. As tres funcoes passam a falar com ela pelo mesmo
+   cliente que o resto do sistema usa — e param de passar pelo
+   motor antigo.
+
+   O endereco publico continua o mesmo: analise.html?e=<codigo>.
+   =============================================================== */
+(function () {
+
+  function f14_cli() { try { return Sessao.conexao(); } catch (e) { return null; } }
+  function f14_emp() { try { return Sessao.empresa(); } catch (e) { return null; } }
+  function f14_ligada() { try { return !!(Sessao.ligada && Sessao.ligada()); } catch (e) { return false; } }
+
+  function f14_corpo(codigo) {
+    var c = {}, g = {};
+    try { c = cfg() || {}; } catch (e) {}
+    try { g = growthCfg() || {}; } catch (e) {}
+    var nome = "";
+    try { nome = (org() || {}).nome || ""; } catch (e) {}
+    var sigla = c.sigla;
+    if (!sigla) { try { sigla = ini2(nome); } catch (e) { sigla = ""; } }
+    var zap = "";
+    try { zap = dig(g.whatsapp || ""); } catch (e) { zap = String(g.whatsapp || ""); }
+
+    return {
+      codigo:         codigo,
+      tenant_id:      f14_emp(),
+      nome:           nome,
+      sigla:          sigla || "",
+      whatsapp:       zap,
+      pagamento_link: c.pagamento_link || "",
+      ativo:          true
+    };
+  }
+
+  /* ------------------------------------------------------------
+     ler o link que a empresa ja tem
+     ------------------------------------------------------------ */
+  buscarLinkLoja = function () {
+    var cli = f14_cli();
+    if (!cli || !f14_ligada() || LINK_LOJA.buscando) { return; }
+    LINK_LOJA.buscando = true;
+    cli.from("formularios").select("codigo").limit(1)
+      .then(function (r) {
+        LINK_LOJA.buscando = false;
+        var l = (r && r.data) || [];
+        if (l.length) {
+          LINK_LOJA.codigo = l[0].codigo;
+          try { repintar(); } catch (e) {}
+        }
+      })
+      .catch(function () { LINK_LOJA.buscando = false; });
+  };
+  try { window.buscarLinkLoja = buscarLinkLoja; } catch (e) {}
+
+  /* ------------------------------------------------------------
+     criar — uma vez por empresa, e vale para sempre
+
+     tenant_id e unico na tabela. Se ja existir, o upsert por
+     tenant_id devolve o codigo que ja estava la em vez de criar
+     um segundo link e deixar o primeiro divulgado sem resposta.
+     ------------------------------------------------------------ */
+  criarLinkLoja = function () {
+    var cli = f14_cli();
+    if (!cli || !f14_ligada()) {
+      try { toast("Sem conexao com o servidor. O link mora la.", "err"); } catch (e) {}
+      return;
+    }
+    if (!f14_emp()) {
+      try { toast("Este acesso nao esta ligado a nenhuma empresa.", "err"); } catch (e) {}
+      return;
+    }
+
+    /* ja existe? entao e esse */
+    cli.from("formularios").select("codigo").limit(1).then(function (r) {
+      var achou = ((r && r.data) || [])[0];
+      if (achou && achou.codigo) {
+        LINK_LOJA.codigo = achou.codigo;
+        try { save(); ir("analises"); } catch (e) {}
+        try { toast("Esta empresa ja tinha um link. Ele continua valendo.", "ok"); } catch (e) {}
+        return;
+      }
+
+      var corpo = f14_corpo(codigoLoja());
+      cli.from("formularios").upsert(corpo, { onConflict: "tenant_id" }).select("codigo")
+        .then(function (w) {
+          if (w.error) {
+            try { toast("O servidor recusou criar o link: " + w.error.message, "err"); } catch (e) {}
+            return;
+          }
+          var linha = (w.data || [])[0] || {};
+          LINK_LOJA.codigo = linha.codigo || corpo.codigo;
+          try { logar("Link de analise de credito criado", LINK_LOJA.codigo); } catch (e) {}
+          try { save(); ir("analises"); } catch (e) {}
+          try { toast("Link criado. Ele vale para sempre — e so divulgar.", "ok"); } catch (e) {}
+        })
+        .catch(function () {
+          try { toast("Sem resposta do servidor.", "err"); } catch (e) {}
+        });
+    }).catch(function () {
+      try { toast("Sem resposta do servidor.", "err"); } catch (e) {}
+    });
+  };
+  try { window.criarLinkLoja = criarLinkLoja; } catch (e) {}
+
+  /* ------------------------------------------------------------
+     manter a pagina publica em dia
+
+     Sem isto o cliente ve o valor e nao ve onde pagar, porque o
+     link de pagamento mudou nas configuracoes e nao chegou la.
+     ------------------------------------------------------------ */
+  atualizarLinkPagamentoNuvem = function () {
+    var cli = f14_cli();
+    if (!cli || !f14_ligada() || !LINK_LOJA.codigo) { return; }
+    var corpo = f14_corpo(LINK_LOJA.codigo);
+    delete corpo.codigo;
+    delete corpo.tenant_id;
+    cli.from("formularios").update(corpo).eq("codigo", LINK_LOJA.codigo)
+      .then(function () {}).catch(function () {});
+  };
+  try { window.atualizarLinkPagamentoNuvem = atualizarLinkPagamentoNuvem; } catch (e) {}
+
+  try { document.documentElement.setAttribute("data-f14", "ativa"); } catch (e) {}
+})();
+
+
+/* ===============================================================
+   VYOHA SYSTEM · FASE 15 · A ANALISE DE CREDITO SAI DO NAVEGADOR
+
+   O QUE ESTAVA QUEBRADO
+
+   Nada nunca populou DB.analises a partir do servidor. A camada
+   Dados ate conhece a tabela, mas o carregador nunca foi escrito.
+   Todas as telas liam o array local; todas as gravacoes iam para
+   o localStorage e morriam ali.
+
+   Resultado pratico: o cliente preenchia o formulario publico, a
+   linha nascia no servidor, e o System nunca via. O vendedor
+   agendava visita e ninguem mais enxergava. A ma referencia de um
+   cliente ficava no navegador de quem registrou.
+
+   O proprio codigo sabia: a fase 4 deixou "analises" e
+   "restricoes" na lista AINDA_LOCAIS, e o chip do topo diz
+   "Migracao em andamento" por causa disso.
+
+   O QUE MUDA AQUI
+
+   Nenhuma arquitetura nova. O mesmo padrao de clientes, produtos
+   e vendas:
+
+     montarX()  le a projecao do Dados
+     DB.X = montarX()
+     escrita pelo Dados ou por funcao de servidor
+
+   Leitura: analises, restricoes e metas passam a vir do servidor.
+   Escrita: decidir_analise (aprovar/reprovar, ja existia) e
+   andar_analise (visita, frete, entrega — fase 15).
+   =============================================================== */
+(function () {
+
+  function f15_cli()    { try { return Sessao.conexao(); } catch (e) { return null; } }
+  function f15_ligada() { try { return !!(Sessao.ligada && Sessao.ligada()); } catch (e) { return false; } }
+  function f15_eu()     { try { return (Sessao.quem() || {}).user_id || null; } catch (e) { return null; } }
+
+  function f15_repintar(telas) {
+    try {
+      if (telas.indexOf(View.pg) >= 0) { ir(View.pg, View.p); }
+    } catch (e) {}
+  }
+
+  /* ------------------------------------------------------------
+     ANALISES
+     ------------------------------------------------------------ */
+  function montarAnalises() {
+    return Dados.lista("analises").map(function (a) {
+      var d = a.dados || {};
+      return Object.assign({}, d, {
+        id:         a.id,
+        tenant_id:  a.tenant_id,
+        versao:     a.versao,
+        criado:     (a.criado_em || "").substring(0, 10),
+        criado_por: a.criado_por,
+        /* das colunas, nao do jsonb: sao elas que a RLS enxerga
+           e que o servidor usa para filtrar */
+        cpf:         a.cpf         != null ? a.cpf         : (d.cpf || ""),
+        status:      a.status      != null ? a.status      : (d.status || "aberta"),
+        vendedor_id: a.vendedor_id != null ? a.vendedor_id : (d.vendedor_id || null),
+        visita_ate:  a.visita_ate  != null ? a.visita_ate  : (d.visita_ate || null),
+        frete:       a.frete       != null ? a.frete       : (d.frete || 0),
+        etapas:      Array.isArray(d.etapas) ? d.etapas : [],
+        formulario:  d.formulario || {},
+        nome:        d.nome || (d.formulario && d.formulario.nome) || ""
+      });
+    });
+  }
+  function repovoarAnalises() { DB.analises = montarAnalises(); }
+
+  window.carregarAnalises = function () {
+    if (!f15_ligada()) { return Promise.resolve(false); }
+    return Dados.consultar("analises", { limite: 300, ordem: "criado_em", desc: true })
+      .then(function () {
+        repovoarAnalises();
+        Dados.aoMudar("analises", function () {
+          repovoarAnalises();
+          f15_repintar(["analises", "pdv", "dashboard", "clientes"]);
+        });
+        try { TempoReal.assinar("analises"); } catch (e) {}
+        return true;
+      })
+      .catch(function () { return false; });
+  };
+
+  /* ------------------------------------------------------------
+     RESTRICOES — a ma referencia, que a rede inteira consulta
+     ------------------------------------------------------------ */
+  function montarRestricoes() {
+    return Dados.lista("restricoes").map(function (r) {
+      var d = r.dados || {};
+      return Object.assign({}, d, {
+        id:        r.id,
+        tenant_id: r.tenant_id,
+        versao:    r.versao,
+        cpf:       r.cpf != null ? r.cpf : (d.cpf || ""),
+        criado:    (r.criado_em || "").substring(0, 10)
+      });
+    });
+  }
+  function repovoarRestricoes() { DB.restricoes = montarRestricoes(); }
+
+  window.carregarRestricoes = function () {
+    if (!f15_ligada()) { return Promise.resolve(false); }
+    return Dados.carregarInteira("restricoes").then(function () {
+      repovoarRestricoes();
+      Dados.aoMudar("restricoes", function () {
+        repovoarRestricoes();
+        f15_repintar(["analises", "clientes", "pdv"]);
+      });
+      return true;
+    }).catch(function () { return false; });
+  };
+
+  /* ------------------------------------------------------------
+     METAS
+     ------------------------------------------------------------ */
+  function montarMetas() {
+    return Dados.lista("metas").map(function (m) {
+      var d = m.dados || {};
+      return Object.assign({}, d, {
+        id: m.id, tenant_id: m.tenant_id, versao: m.versao,
+        criado: (m.criado_em || "").substring(0, 10)
+      });
+    });
+  }
+  function repovoarMetas() { DB.metas = montarMetas(); }
+
+  window.carregarMetas = function () {
+    if (!f15_ligada()) { return Promise.resolve(false); }
+    return Dados.carregarInteira("metas").then(function () {
+      repovoarMetas();
+      Dados.aoMudar("metas", function () {
+        repovoarMetas();
+        f15_repintar(["supervisao", "dashboard", "metas"]);
+      });
+      return true;
+    }).catch(function () { return false; });
+  };
+
+  window.salvarMeta = function (id) {
+    var tit = v("mt-tit"), alvo = nv("mt-alvo");
+    if (!tit || tit.length < 2) { return toast("Informe o titulo da meta.", "err"); }
+    if (!(alvo > 0))            { return toast("Informe o alvo.", "err"); }
+
+    var corpo = {
+      titulo: tit, alvo: alvo, tipo: v("mt-tipo"), premio: v("mt-premio"),
+      mes: v("mt-mes"), autor: f15_eu(), realizado_manual: 0
+    };
+
+    var passo;
+    if (id) {
+      var atual = (DB.metas || []).filter(function (m) { return m.id === id; })[0] || {};
+      passo = Dados.alterar("metas", id, { dados: Object.assign({}, atual, corpo) }, atual.versao);
+    } else {
+      passo = Dados.criar("metas", { id: uid("mt"), dados: corpo });
+    }
+
+    passo.then(function (r) {
+      if (r.erro)     { return toast(r.erro, "err"); }
+      if (r.conflito) { return toast("Alguem alterou esta meta antes. Abra de novo.", "err"); }
+      try { logar("Meta definida", tit); } catch (e) {}
+      try { fecharModal(); } catch (e) {}
+      toast(id ? "Meta atualizada." : "Meta criada.", "ok");
+      f15_repintar(["supervisao", "dashboard", "metas"]);
+    }).catch(function () { toast("Sem resposta do servidor.", "err"); });
+  };
+
+  /* ------------------------------------------------------------
+     A DECISAO DA VISITA
+
+     Aprovar e reprovar ja tinham caminho no servidor:
+     decidir_analise(alvo, decisao, motivo, relato). E ela que
+     grava a ma referencia junto, na mesma transacao — por isso
+     registrarRestricao deixa de ser chamado daqui.
+
+     Agendar visita passa por andar_analise.
+     ------------------------------------------------------------ */
+  window.salvarVisita = function (id) {
+    var err = el("vs-err");
+    function bad(m) {
+      if (!err) { return toast(m, "err"); }
+      err.innerHTML = "<span>" + ICON.alert + "</span><div>" + esc(m) + "</div>";
+      err.classList.remove("hidden");
+    }
+    var res = v("vs-res");
+    if (!res) { return bad("Diga como foi a entrevista."); }
+
+    var a = (DB.analises || []).filter(function (x) { return x.id === id; })[0] || {};
+
+    function pronto(msg) {
+      try { logar("Visita registrada", (a.nome || "") + " · " + res); } catch (e) {}
+      try { fecharModal(); } catch (e) {}
+      var volta = (View.pg === "pdv") ? "pdv" : "analises";
+      window.carregarAnalises().then(function () { try { ir(volta); } catch (e) {} });
+      toast(msg, "ok");
+    }
+
+    if (res === "visita_agendada") {
+      Dados.chamar("andar_analise", {
+        alvo: id, acao: "agendar_visita",
+        dados: { obs: v("vs-obs") || "" }
+      }).then(function (r) {
+        if (r.erro) { return bad(r.erro); }
+        pronto("Visita agendada.");
+      }).catch(function () { bad("Sem resposta do servidor."); });
+      return;
+    }
+
+    if (res === "reprovado" && !v("vs-motivo")) {
+      return bad("Escolha o motivo da reprovacao.");
+    }
+    var marcarMa = (res === "reprovado") && ck("vs-black");
+    if (marcarMa && v("vs-relato").length < 15) {
+      return bad("Para registrar ma referencia, escreva o relato de quem informou.");
+    }
+    if (marcarMa && !(a.formulario && a.formulario.cpf)) {
+      return bad("Sem o CPF do formulario nao da para registrar ma referencia.");
+    }
+
+    Dados.chamar("decidir_analise", {
+      alvo:    id,
+      decisao: res,
+      motivo:  res === "reprovado" ? v("vs-motivo") : "",
+      relato:  marcarMa ? v("vs-relato") : ""
+    }).then(function (r) {
+      if (r.erro) { return bad(r.erro); }
+
+      if (v("vs-obs")) {
+        Dados.chamar("andar_analise", { alvo: id, acao: "observacao", dados: { obs: v("vs-obs") } })
+          .catch(function () {});
+      }
+
+      /* A MA REFERENCIA E GRAVADA AQUI, E NAO NO decidir_analise
+
+         O teste em producao mostrou: decidir_analise recebe o
+         `relato` e nao escreve nada em restricoes. Quem grava e
+         a empresa, pela politica "a empresa registra restricao"
+         que ja existe na tabela.
+
+         Fica depois da decisao de proposito: se a reprovacao
+         falhar, nao nasce restricao para uma analise que
+         continua aberta. */
+      if (!marcarMa) {
+        return pronto(res === "aprovado"
+          ? "Aprovado. O cliente ja ve isso no link dele."
+          : "Resultado registrado.");
+      }
+
+      var f = a.formulario || {};
+      var so = String(f.cpf || "").replace(/\D/g, "");
+      return Dados.criar("restricoes", {
+        id:  uid("rs"),
+        cpf: so,
+        dados: {
+          cpf:      so,
+          nome:     f.nome || a.nome || "",
+          motivo:   v("vs-motivo"),
+          relato:   v("vs-relato"),
+          origem:   "analise",
+          analise_id: id,
+          revogada: false
+        }
+      }).then(function (rr) {
+        if (rr.erro) {
+          return bad("A reprovacao foi registrada, mas a ma referencia nao: " + rr.erro);
+        }
+        window.carregarRestricoes();
+        pronto("Resultado registrado e ma referencia anotada.");
+      });
+    }).catch(function () { bad("Sem resposta do servidor."); });
+  };
+
+  /* ------------------------------------------------------------
+     FRETE E ENTREGA
+     ------------------------------------------------------------ */
+  window.confirmarFrete = function (id) {
+    var a = (DB.analises || []).filter(function (x) { return x.id === id; })[0];
+    if (!a) { return; }
+    var valor = 0;
+    try { valor = valorFrete(); } catch (e) { valor = a.frete_valor || a.frete || 0; }
+
+    function agora() {
+      Dados.chamar("andar_analise", { alvo: id, acao: "frete", dados: { frete_valor: valor } })
+        .then(function (r) {
+          if (r.erro) { return toast(r.erro, "err"); }
+          try { logar("Frete confirmado", (a.formulario || {}).nome || a.nome); } catch (e) {}
+          try { fecharModal(); } catch (e) {}
+          window.carregarAnalises().then(function () { try { ir("vendas"); } catch (e) {} });
+          toast("Frete confirmado. Agora da para marcar a entrega.", "ok");
+        }).catch(function () { toast("Sem resposta do servidor.", "err"); });
+    }
+
+    try {
+      confirmar("Confirmar o pagamento do frete?",
+        "Voce esta dizendo que o valor de <b>" + money(valor) + "</b> ja entrou na conta da loja. " +
+        "Isso libera o agendamento da entrega e fica registrado com o seu nome.", agora, "Confirmar");
+    } catch (e) { agora(); }
+  };
+
+  window.salvarEntrega = function (id) {
+    var err = el("en-err");
+    function bad(m) {
+      if (!err) { return toast(m, "err"); }
+      err.innerHTML = "<span>" + ICON.alert + "</span><div>" + esc(m) + "</div>";
+      err.classList.remove("hidden");
+    }
+    var data = v("en-data");
+    if (!data) { return bad("Escolha a data da entrega."); }
+    try { if (data < today()) { return bad("A data nao pode ser no passado."); } } catch (e) {}
+
+    Dados.chamar("andar_analise", {
+      alvo: id, acao: "agendar_entrega",
+      dados: {
+        entrega_data:    data,
+        entrega_periodo: v("en-periodo"),
+        entrega_quem:    v("en-quem"),
+        entrega_obs:     v("en-obs")
+      }
+    }).then(function (r) {
+      if (r.erro) { return bad(r.erro); }
+      try { logar("Entrega marcada", id + " · " + data); } catch (e) {}
+      try { fecharModal(); } catch (e) {}
+      window.carregarAnalises().then(function () {
+        try { ir("vendas"); } catch (e) {}
+        try { modalMensagemEntrega(id); } catch (e) {}
+      });
+    }).catch(function () { bad("Sem resposta do servidor."); });
+  };
+
+  window.marcarEntregue = function (id) {
+    var a = (DB.analises || []).filter(function (x) { return x.id === id; })[0];
+    if (!a) { return; }
+
+    function agora() {
+      Dados.chamar("andar_analise", { alvo: id, acao: "entregue", dados: {} })
+        .then(function (r) {
+          if (r.erro) { return toast(r.erro, "err"); }
+          try { logar("Entrega concluida", (a.formulario || {}).nome || a.nome); } catch (e) {}
+          try { fecharModal(); } catch (e) {}
+          window.carregarAnalises().then(function () { try { ir("vendas"); } catch (e) {} });
+          toast("Entrega registrada.", "ok");
+        }).catch(function () { toast("Sem resposta do servidor.", "err"); });
+    }
+
+    try {
+      confirmar("Confirmar que foi entregue?",
+        "O produto saiu e chegou ao cliente. A partir daqui, a analise sai do painel de acompanhamento.",
+        agora, "Confirmar");
+    } catch (e) { agora(); }
+  };
+
+  /* registrarRestricao vira caminho unico: quem grava e o
+     decidir_analise, na mesma transacao da reprovacao. Deixar
+     um segundo caminho vivo e deixar duas verdades. */
+  window.registrarRestricao = function () {
+    toast("A ma referencia e registrada junto com a reprovacao da analise.", "err");
+  };
+
+  window.revogarRestricao = function (id) {
+    var r0 = (DB.restricoes || []).filter(function (x) { return x.id === id; })[0] || {};
+    Dados.alterar("restricoes", id,
+      { dados: Object.assign({}, r0, { revogada: true, revogada_em: new Date().toISOString(), revogada_por: f15_eu() }) },
+      r0.versao)
+      .then(function (r) {
+        if (r.erro) { return toast(r.erro, "err"); }
+        try { fecharModal(); } catch (e) {}
+        window.carregarRestricoes().then(function () { f15_repintar(["analises", "clientes"]); });
+        toast("Registro retirado.", "ok");
+      }).catch(function () { toast("Sem resposta do servidor.", "err"); });
+  };
+
+  /* ------------------------------------------------------------
+     arrancar: carrega as tres assim que a sessao subir
+     ------------------------------------------------------------ */
+  var tentou = 0;
+  (function f15_arrancar() {
+    if (!f15_ligada()) {
+      tentou++;
+      if (tentou < 240) { setTimeout(f15_arrancar, 1200); }
+      return;
+    }
+    Promise.all([
+      window.carregarAnalises(),
+      window.carregarRestricoes(),
+      window.carregarMetas()
+    ]).then(function () {
+      try { document.documentElement.setAttribute("data-f15", "carregou"); } catch (e) {}
+      f15_repintar(["analises", "pdv", "dashboard", "supervisao"]);
+    });
+  })();
+
+  try { document.documentElement.setAttribute("data-f15", "ativa"); } catch (e) {}
+})();
+
+</script>
 </body>
 </html>
