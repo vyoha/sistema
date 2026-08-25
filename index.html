@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-25-c";
+  var F22_VERSAO = "2026-08-25-d";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -14169,3 +14169,269 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 </script>
 </body>
 </html>
+
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 25 · O PONTO DE VENDA DO VENDEDOR
+
+   O QUE A NANDA RELATOU
+
+   "o vendedor precisa ter um ponto de venda simples e que fique
+    bom visualmente em mobile, o que n e o caso, ja que em modo
+    mobile as paginas estao sobrepondo, nao tem visualizacao
+    simples, etc."
+
+   O QUE EU MEDI — nao supus, medi, num viewport de 390 x 800
+
+   1 · O CARRINHO COBRE O CATALOGO
+
+   Em telas ate 900px o CSS ja transforma o carrinho em painel
+   fixo:
+
+     .pdv-cart{position:fixed;bottom:0;max-height:72vh}
+     .pdv-cart:not(.on){display:none}
+
+   E o `.on` entra sozinho assim que ha item:
+
+     '<div class="pdv-cart' + (PDV.itens.length ? " on" : "") + '">'
+
+   Medido com um produto no carrinho:
+
+     carrinho   topo   88   base  664   altura 576  (72% da tela)
+     catalogo   topo  293   base  458
+
+   O carrinho engole o catalogo inteiro. Colocou o primeiro
+   produto, nao ve mais os outros — e nao ha como fechar o painel,
+   porque ele so some quando o carrinho fica vazio. Isso e a
+   sobreposicao que ela viu.
+
+   2 · O MODAL SOBRA POUCO ESPACO
+
+     .md-b{max-height:calc(100vh - 250px)}
+
+   Numa tela de 470px de altura sobram 220px de formulario, com
+   cabecalho e rodape comendo 154. O campo fica meio escondido
+   atras do rodape — parece sobreposicao, e na pratica e a mesma
+   coisa para quem esta olhando.
+
+   3 · A LINHA DO PRODUTO NAO DESMONTA
+
+     '<div class="rw" style="grid-template-columns:3fr 96px auto">'
+
+   Esta no atributo `style`, entao nenhuma media query alcanca:
+   num celular, Produto, Qtd e Adicionar continuam espremidos em
+   tres colunas e o nome do produto vira "AUDITOI".
+
+   4 · METRICAS QUE NAO SAO DO VENDEDOR
+
+   A tela de Vendas abre com quatro indicadores de gestao:
+
+     Vendido no periodo · Em aberto · Atrasadas · Quitadas
+
+   mais o botao Relatorios. Carteira, inadimplencia e relatorio
+   sao leitura de quem administra. O vendedor precisa saber o que
+   ele vendeu e o que falta entregar.
+
+   O QUE ESTA CAMADA FAZ — SO PARA O PERFIL VENDEDOR
+
+   1 · O carrinho vira gaveta. Fechado, e uma barra de 1 linha no
+       pe da tela: "1 item · R$ 1.200,00 · Ver". Toca, abre; toca
+       de novo, fecha. O catalogo fica sempre alcancavel.
+   2 · O modal ganha o espaco que tem: no celular ele ocupa a tela
+       inteira, com o rodape ancorado embaixo e o corpo rolando
+       entre cabecalho e rodape — sem campo escondido.
+   3 · Os quatro indicadores de gestao e o botao Relatorios saem
+       da tela de Vendas do vendedor. No lugar, uma linha: quantas
+       vendas ele fez no periodo e quanto somam.
+
+   O ADMINISTRADOR NAO MUDA EM NADA. Todo o CSS desta camada esta
+   atras de `html[data-f25="vendedor"]`, e o atributo so e escrito
+   quando `isVend()` responde verdadeiro. Uma sessao de admin, ou
+   uma aba antiga sem esta camada, se comporta exatamente como
+   antes.
+
+   Nenhuma tela e reescrita: a camada mexe no que ja foi
+   desenhado, depois que o `ir()` desenha.
+   =============================================================== */
+(function () {
+
+  var F25 = { perfil: null, gaveta: 0, vendas: 0, css: false };
+
+  function f25_ehVendedor() {
+    try { return typeof isVend === "function" && isVend(); } catch (e) { return false; }
+  }
+
+  function f25_money(n) {
+    try { if (typeof money === "function") { return money(n); } } catch (e) {}
+    return "R$ " + (Number(n) || 0).toFixed(2).replace(".", ",");
+  }
+
+  /* =============================================================
+     1 · o CSS — todo ele atras do atributo do vendedor
+     ============================================================= */
+  function f25_css() {
+    if (document.getElementById("f25-css")) { return; }
+    var s = document.createElement("style");
+    s.id = "f25-css";
+    s.textContent = [
+      "@media(max-width:900px){",
+
+      /* --- o carrinho vira gaveta --- */
+      'html[data-f25="vendedor"] .pdv-cart{',
+      "  position:fixed;left:0;right:0;bottom:0;top:auto;z-index:70;",
+      "  border-radius:18px 18px 0 0;padding:0 16px 16px;",
+      "  box-shadow:0 -14px 40px -18px rgba(9,40,56,.5);",
+      "}",
+      'html[data-f25="vendedor"] .pdv-cart:not(.f25-aberta){max-height:66px;overflow:hidden}',
+      'html[data-f25="vendedor"] .pdv-cart.f25-aberta{max-height:78vh;overflow-y:auto}',
+
+      /* a alca fica sempre visivel, mesmo com a gaveta rolando */
+      'html[data-f25="vendedor"] .f25-alca{',
+      "  position:sticky;top:0;z-index:2;background:#fff;",
+      "  display:flex;align-items:center;gap:10px;width:100%;",
+      "  border:0;padding:16px 0 14px;text-align:left;cursor:pointer;",
+      "  font:650 14.5px/1.2 inherit;color:inherit;",
+      "}",
+      'html[data-f25="vendedor"] .f25-alca .f25-tot{margin-left:auto;font-weight:700}',
+      'html[data-f25="vendedor"] .f25-alca .f25-seta{opacity:.55;font-size:12px}',
+      'html[data-f25="vendedor"] .pdv-cart.f25-aberta .f25-alca .f25-seta{transform:rotate(180deg)}',
+      'html[data-f25="vendedor"] .pdv-cart .pdv-cart-h{display:none}',
+
+      /* espaco para a barra nao tapar o fim da lista */
+      'html[data-f25="vendedor"] .page{padding-bottom:120px}',
+
+      /* --- o modal usa a tela toda --- */
+      'html[data-f25="vendedor"] .md-bg{padding:0;align-items:stretch}',
+      'html[data-f25="vendedor"] .md-bg > div{',
+      "  width:100%;max-width:none;border-radius:0;min-height:100%;",
+      "  display:flex;flex-direction:column;",
+      "}",
+      'html[data-f25="vendedor"] .md-b{max-height:none;flex:1;overflow-y:auto;padding:20px 18px}',
+      'html[data-f25="vendedor"] .md-h{padding:18px}',
+      'html[data-f25="vendedor"] .md-f{',
+      "  position:sticky;bottom:0;border-radius:0;padding:14px 18px;",
+      "  box-shadow:0 -8px 24px -18px rgba(9,40,56,.6);",
+      "}",
+      'html[data-f25="vendedor"] .md-f .btn{flex:1;justify-content:center}',
+
+      /* a linha de produto tem grid-template-columns no atributo style:
+         so um !important a desmonta no celular */
+      'html[data-f25="vendedor"] .md-b .rw{grid-template-columns:1fr !important}',
+      "}"
+    ].join("\n");
+    document.head.appendChild(s);
+    F25.css = true;
+  }
+
+  /* =============================================================
+     2 · a gaveta do carrinho
+     ============================================================= */
+  function f25_alca() {
+    var cart = document.querySelector(".pdv-cart");
+    if (!cart || !cart.classList.contains("on")) { return; }
+    if (cart.querySelector(".f25-alca")) { return; }
+
+    var qtd = 0, total = 0;
+    try {
+      (PDV.itens || []).forEach(function (i) {
+        qtd += Number(i.qtd) || 0;
+        total += (Number(i.preco) || 0) * (Number(i.qtd) || 0);
+      });
+    } catch (e) {}
+
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "f25-alca";
+    b.innerHTML =
+      "<span>" + qtd + (qtd === 1 ? " item" : " itens") + "</span>" +
+      '<span class="f25-tot">' + f25_money(total) + "</span>" +
+      '<span class="f25-seta">&#9650;</span>';
+    b.onclick = function () {
+      cart.classList.toggle("f25-aberta");
+      F25.gaveta++;
+    };
+    cart.insertBefore(b, cart.firstChild);
+  }
+
+  /* =============================================================
+     3 · a tela de Vendas sem o painel de gestao
+     ============================================================= */
+  function f25_vendasSimples() {
+    var page = document.getElementById("page") || document.querySelector(".page");
+    if (!page) { return; }
+
+    /* o bloco de indicadores e o unico .grid.c4 do topo da tela */
+    var g = page.querySelector(".grid.c4");
+    if (g && /Vendido no per|Quitadas/.test(g.textContent || "")) {
+      var qtd = 0, soma = 0;
+      try {
+        var per = periodo();
+        (vendas() || []).forEach(function (s) {
+          if (s.data >= per[0] && s.data <= per[1] && statusVenda(s) !== "cancelada") {
+            qtd++; soma += Number(s.total) || 0;
+          }
+        });
+      } catch (e) {}
+
+      var linha = document.createElement("div");
+      linha.className = "box";
+      linha.setAttribute("style", "padding:16px 18px;margin-bottom:18px;display:flex;gap:14px;align-items:baseline;flex-wrap:wrap");
+      linha.innerHTML =
+        '<b style="font-size:19px;letter-spacing:-.5px">' + qtd + (qtd === 1 ? " venda sua" : " vendas suas") + "</b>" +
+        '<span class="sm mut">no período</span>' +
+        '<b style="margin-left:auto;font-size:19px;letter-spacing:-.5px">' + f25_money(soma) + "</b>";
+      g.parentNode.replaceChild(linha, g);
+      F25.vendas++;
+    }
+
+    /* Relatorios e leitura de gestao */
+    try {
+      var bs = page.querySelectorAll(".head .act button, .head button");
+      for (var i = 0; i < bs.length; i++) {
+        if (/Relatórios/.test(bs[i].textContent || "")) { bs[i].style.display = "none"; }
+      }
+    } catch (e) {}
+  }
+
+  /* =============================================================
+     quando aplicar
+     ============================================================= */
+  function f25_aplicar(pagina) {
+    if (!f25_ehVendedor()) { return; }
+    try { document.documentElement.setAttribute("data-f25", "vendedor"); } catch (e) {}
+    f25_css();
+    try { if (pagina === "pdv") { f25_alca(); } } catch (e) {}
+    try { if (pagina === "vendas") { f25_vendasSimples(); } } catch (e) {}
+  }
+
+  try {
+    if (typeof ir === "function") {
+      var irAntigo25 = ir;
+      ir = function (p) {
+        var r = irAntigo25.apply(this, arguments);
+        try { f25_aplicar(String(p || "")); } catch (e) {}
+        return r;
+      };
+      window.ir = ir;
+    }
+  } catch (e) {}
+
+  /* a primeira tela ja pode ser o PDV, desenhada antes deste wrap */
+  try {
+    setTimeout(function () {
+      if (!f25_ehVendedor()) { return; }
+      F25.perfil = "vendedor";
+      var atual = "";
+      try { atual = String((typeof UI !== "undefined" && UI && UI.pag) || location.hash || ""); } catch (e) {}
+      f25_aplicar(document.querySelector(".pdv-cart") ? "pdv" : (atual.indexOf("vendas") >= 0 ? "vendas" : ""));
+    }, 900);
+  } catch (e) {}
+
+  try {
+    window.F25 = F25;
+    window.f25_aplicar = f25_aplicar;
+    document.documentElement.setAttribute("data-f25marca", "ativa");
+  } catch (e) {}
+})();
+
+</script>
