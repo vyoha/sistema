@@ -13605,46 +13605,46 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 /* ===============================================================
    VYOHA SYSTEM · FASE 21 · A EMPRESA VOLTA A SE RECONHECER
 
-   Ao entrar como gestor da rede, a primeira tela mostrava:
+   Ao entrar, a tela de Configuracoes mostrava:
 
-     Configuracoes — Central de configuracao de Vyoha
+     Central de configuracao de Vyoha
      Nome da empresa: Vyoha
 
-   Nao e a empresa dele. E o texto de emergencia de 'org()':
+   Nao e a empresa de ninguem. E o texto de emergencia de 'org()':
 
      return find(DB.tenants, T()) ||
             { nome: "Vyoha", slug: "app", cidade: "", uf: "", cnpj: "" };
 
-   Medido ao vivo na sessao do gestor:
-
-     perfil ....... holding
-     T() .......... t72875b600746      (certo)
-     DB.tenants ... []                  (vazio)
-     org().nome ... "Vyoha"             (o fallback)
-
-   DB.tenants nunca era preenchido a partir do servidor. Nenhuma
-   carga do System buscava a propria empresa. Quem dependia disso:
-
-     org()              nome, cidade, UF, CNPJ, slug, monograma
-     limiteContratado() limites de admins, PDVs e operacionais
-     usoLicenca()       "3 de 5 PDVs" na tela de equipe
-     ehHolding()        se este ambiente e uma rede
-     vagasRede()        quantas empresas cabem na rede
-
-   Com a lista vazia tudo isso caia no LIMITES_PADRAO: a empresa
-   se chamava Vyoha e os limites nao eram os contratados.
+   DB.tenants nunca era preenchido a partir do servidor. Quem
+   dependia disso: org() (nome, cidade, UF, CNPJ, monograma),
+   limiteContratado() (admins, PDVs, operacionais), usoLicenca(),
+   ehHolding() e vagasRede(). Com a lista vazia tudo caia no
+   LIMITES_PADRAO — a empresa se chamava Vyoha e os limites nao
+   eram os contratados.
 
    A tabela 'public.empresas' ja existe e a RLS ja devolve so o
    que aquele acesso pode ver. A camada le e preenche DB.tenants.
    Nenhuma tela e reescrita.
 
-   VALIDADO EM PRODUCAO, sessao do gestor do Grupo Lucena:
+   A CORRIDA COM O LOGIN
 
-     org()              Grupo Lucena
-     tipo               holding
-     limite admins      2      (contratado, nao o padrao)
-     limite empresas    5
-     limite PDVs        0      (correto para holding)
+   Na primeira carga logo depois de entrar, a camada chegava antes
+   do token da sessao ficar pronto e o PostgREST respondia como
+   anonimo:
+
+     data-f21: erro:permission denied for table empresas
+
+   Medido ao vivo: segundos depois a MESMA consulta devolve a
+   linha certa. Nao e permissao, e pressa — e intermitente, que e
+   pior que constante. Por isso a carga insiste algumas vezes, e a
+   rede de seguranca do ir() vale sempre que a lista estiver
+   vazia, tenha havido erro ou nao.
+
+   VALIDADO EM PRODUCAO
+
+     gestor da rede   org() = Grupo Lucena, limites 2/5/0
+     administrador    org() = TESTE VYOHA homologacao, limites 2/2/2
+     14 telas de empresa e 8 do ambiente holding sem quebra
 
    ISOLAMENTO: nao e este arquivo que decide o que aparece, e a
    RLS de 'empresas'. A camada le o que o servidor entrega, sem
@@ -13696,28 +13696,50 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     return c.from("empresas").select("*").then(function (r) {
       if (r.error) { F21.erro = r.error.message; return false; }
       var mudou = f21_aplicar(r.data);
-      F21.carregou = true;
+      F21.carregou = true; F21.erro = null;
       if (mudou) { try { save(); } catch (e) {} }
       return mudou;
     }).catch(function (e) { F21.erro = String(e && e.message); return false; });
   }
-  f21_carregar().then(function (mudou) {
+  var TENTATIVAS = [0, 700, 1800, 4000];
+  function f21_insistir(i) {
+    i = i || 0;
+    return new Promise(function (pronto) {
+      setTimeout(function () {
+        f21_carregar().then(function (mudou) {
+          var achou = Array.isArray(DB.tenants) && DB.tenants.length > 0;
+          if (achou || i >= TENTATIVAS.length - 1) { pronto(mudou); return; }
+          f21_insistir(i + 1).then(pronto);
+        });
+      }, TENTATIVAS[i]);
+    });
+  }
+  f21_insistir(0).then(function (mudou) {
     if (mudou) {
       try { if (typeof montarMenu === "function") { montarMenu(); } } catch (e) {}
       try { if (typeof View !== "undefined" && View.pg) { ir(View.pg, View.p); } } catch (e) {}
     }
     try {
       document.documentElement.setAttribute("data-f21",
-        F21.erro ? ("erro:" + F21.erro) : ("empresas-" + F21.empresas));
+        (Array.isArray(DB.tenants) && DB.tenants.length)
+          ? ("empresas-" + DB.tenants.length)
+          : ("erro:" + (F21.erro || "sem empresa")));
     } catch (e) {}
   });
   try {
     if (typeof ir === "function") {
       var irAntigo = ir, tentando = false;
       ir = function () {
-        if (!tentando && F21.carregou && Array.isArray(DB.tenants) && !DB.tenants.length) {
+        if (!tentando && Array.isArray(DB.tenants) && !DB.tenants.length) {
           tentando = true;
-          f21_carregar().then(function () { tentando = false; });
+          f21_carregar().then(function (mudou) {
+            tentando = false;
+            if (mudou) {
+              try { if (typeof montarMenu === "function") { montarMenu(); } } catch (e) {}
+              try { document.documentElement.setAttribute("data-f21", "empresas-" + DB.tenants.length); } catch (e) {}
+              try { irAntigo(View.pg, View.p); } catch (e) {}
+            }
+          });
         }
         return irAntigo.apply(this, arguments);
       };
