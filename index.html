@@ -13295,5 +13295,214 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 })();
 
 </script>
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 18 · A VENDA VOLTA A CONTAR A VERDADE
+
+   1 · O NUMERO DE PARCELAS VOLTA A SER UM NUMERO
+
+   Aparecia na tela:
+     Parcelamento
+     [object Object],[object Object],[object Object]x de R$ 600,00
+
+   'montarVendas()' monta a venda com Object.assign({}, d, {...}),
+   onde 'd' e o jsonb 'dados' do servidor — e o navegador manda,
+   dentro dele, a LISTA de parcelas. As telas escrevem
+   's.parcelas + "x de "': sempre esperaram a QUANTIDADE. O
+   proprio System confirma em 'salvarReceb':
+
+     s.parcelas = parcelasDaVenda(s.id)
+                   .filter(x => x.status !== "cancelado").length;
+
+   2 · O CUSTO DA VENDA (CMV)
+
+   'montarVendas()' soma o custo de cada venda a partir de
+   'DB.moves', filtrando 'm.tipo === "saida"'. Mas quem a chama e
+   'repovoarOperacao()', dentro de 'carregarOperacao()' — e nesse
+   instante 'DB.moves' pode ainda nao ter chegado. Somar de lista
+   vazia da zero, e zero vira margem de 100% no DRE.
+
+   E uma CORRIDA, nao um erro constante: em um login o custo veio
+   certo sozinho, no anterior veio zerado. Intermitente e pior que
+   constante, porque passa despercebido.
+
+   A formula e a MESMA de 'montarVendas', palavra por palavra.
+   A permissao continua valendo: quem nao pode ver custo nao
+   RECEBE o campo.
+
+   POR QUE AQUI E NAO EM 'montarVendas': ela mora dentro de um
+   IIFE e nao e alcancavel de fora; 'repovoarOperacao' tambem nao.
+   O ponto comum e 'ir()' — e 'pintarDrawer()', que repinta a
+   gaveta por fora do 'ir()'.
+
+   VALIDADO EM PRODUCAO (empresa de homologacao)
+     venda #1   receita 2.400   2 x 700   CMV 1.400   margem 1.000
+     soma de TODAS as saidas .............. 5.600
+     alguma venda recebeu esse total ...... false
+     vendedor sem permissao ............... campo 'custo' ausente
+     4 execucoes seguidas ................. sem dobrar
+     apos carregarOperacao() + ir() ....... recalculado
+     tela Financeiro ...................... margem 41,7%
+   =============================================================== */
+(function () {
+  var F18 = { normalizadas: 0, sem_vinculo: 0, custo_refeito: 0 };
+  function f18_custos() {
+    var pode = true;
+    try { pode = (typeof podeVerCusto === "function") ? podeVerCusto() : true; }
+    catch (e) { pode = false; }
+    if (!pode) { return 0; }
+    if (!Array.isArray(DB.moves) || !DB.moves.length || !Array.isArray(DB.sales)) { return 0; }
+    var porVenda = {};
+    DB.moves.forEach(function (m) {
+      if (!m || m.tipo !== "saida" || !m.sale_id) { return; }
+      porVenda[m.sale_id] = (porVenda[m.sale_id] || 0) +
+        Number(m.custo_unit || 0) * Math.abs(Number(m.qtd || 0));
+    });
+    var n = 0;
+    DB.sales.forEach(function (s) {
+      if (!s) { return; }
+      var somado = porVenda[s.id];
+      if (somado == null) { return; }
+      somado = Math.round(somado * 100) / 100;
+      if (s.custo === somado) { return; }
+      /* venda antiga traz custo no proprio registro: esse manda.
+         Nunca as duas — somar as duas contaria o custo em dobro. */
+      if (s.custo) { return; }
+      s.custo = somado;
+      n++;
+    });
+    if (n) { F18.custo_refeito += n; }
+    return n;
+  }
+  function f18_contar(s) {
+    var n = 0;
+    try {
+      n = parcelasDaVenda(s.id).filter(function (p) {
+        return p && p.status !== "cancelado";
+      }).length;
+    } catch (e) { n = 0; }
+    return n;
+  }
+  function f18_normalizar() {
+    if (typeof DB === "undefined" || !DB || !Array.isArray(DB.sales)) { return 0; }
+    var mexeu = 0;
+    for (var i = 0; i < DB.sales.length; i++) {
+      var s = DB.sales[i];
+      if (!s || !Array.isArray(s.parcelas)) { continue; }
+      if (!s.parcelas_lista) { s.parcelas_lista = s.parcelas; }
+      var n = f18_contar(s);
+      if (!n) { n = s.parcelas.length; F18.sem_vinculo++; }
+      s.parcelas = n;
+      mexeu++;
+    }
+    if (mexeu) { F18.normalizadas += mexeu; }
+    f18_custos();
+    return mexeu;
+  }
+  try {
+    if (typeof ir === "function") {
+      var irAntigo = ir;
+      ir = function () { f18_normalizar(); return irAntigo.apply(this, arguments); };
+      window.ir = ir;
+    }
+  } catch (e) {}
+  try {
+    if (typeof pintarDrawer === "function") {
+      var pdAntigo = pintarDrawer;
+      pintarDrawer = function () { f18_normalizar(); return pdAntigo.apply(this, arguments); };
+      window.pintarDrawer = pintarDrawer;
+    }
+  } catch (e) {}
+  f18_normalizar();
+  try {
+    window.F18 = F18;
+    window.f18_normalizar = f18_normalizar;
+    window.f18_custos = f18_custos;
+    document.documentElement.setAttribute("data-f18",
+      F18.normalizadas ? ("normalizou-" + F18.normalizadas) : "nada-a-normalizar");
+  } catch (e) {}
+})();
+</script>
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 19 · "NO CAIXA AGORA" PARA DE PROMETER
+   PRESENCA QUE NAO EXISTE
+
+   A tela Supervisao de PDV mostrava "No caixa agora" e um ponto
+   verde por operador, com a legenda "atualiza sozinho a cada
+   minuto". A conta vinha de:
+
+     function pulso() { ... u.visto = new Date().toISOString(); save(); }
+     function estaOnline(u) { return minutosDesde(u.visto) < 4; }
+
+   'save()' grava no localStorage DO PROPRIO NAVEGADOR. O pulso do
+   vendedor fica no computador do vendedor e nunca chega ao
+   administrador. Pior: 'DB.users' e remontado a cada carga a
+   partir da tabela 'perfis' do servidor, e essa projecao nao tem
+   o campo 'visto' — ele e descartado.
+
+   Resultado: para o administrador, 'u.visto' e sempre nulo e
+   'estaOnline' e sempre falso. "No caixa agora" mostrava 0 de N,
+   sempre, e o ponto ficava cinza para todo mundo. A tela prometia
+   presenca em tempo real e entregava nada.
+
+   Esta camada NAO constroi mecanismo de presenca novo. Troca a
+   promessa pelo dado que EXISTE no servidor: 'perfis.ultimo_acesso',
+   que a projecao ja traz como 'u.acesso'.
+
+     "No caixa agora"                 ->  "Acessaram hoje"
+     "atualiza sozinho a cada minuto" ->  "pelo ultimo acesso registrado"
+     "no sistema · ha 3 min"          ->  "ultimo acesso ha 3 min"
+
+   Produtividade, faturamento, ticket e vagas de PDV continuam
+   vindo das vendas, como ja vinham. 'pulso()' continua rodando.
+   =============================================================== */
+(function () {
+  try {
+    estaOnline = function (u) {
+      var a = u && u.acesso;
+      if (!a) { return false; }
+      return String(a).substring(0, 10) === today();
+    };
+    window.estaOnline = estaOnline;
+  } catch (e) {}
+
+  try {
+    if (typeof produtividadePdv === "function") {
+      var prodAntiga = produtividadePdv;
+      produtividadePdv = function (ini, fim) {
+        var l = prodAntiga(ini, fim);
+        l.forEach(function (x) {
+          var u = x.user || {};
+          x.visto = u.acesso || null;      /* servidor, nao localStorage */
+          x.online = estaOnline(u);
+        });
+        return l;
+      };
+      window.produtividadePdv = produtividadePdv;
+    }
+  } catch (e) {}
+
+  try {
+    if (typeof pg_supervisao === "function") {
+      var pgAntiga = pg_supervisao;
+      pg_supervisao = function () {
+        var h = pgAntiga.apply(this, arguments);
+        if (typeof h !== "string") { return h; }
+        return h
+          .split("No caixa agora").join("Acessaram hoje")
+          .split("atualiza sozinho a cada minuto").join("pelo último acesso registrado")
+          .split("ninguém conectado neste momento").join("ninguém acessou hoje")
+          .split("no sistema · ").join("último acesso ")
+          .split('title="online"').join('title="acessou hoje"')
+          .split('title="offline"').join('title="não acessou hoje"');
+      };
+      window.pg_supervisao = pg_supervisao;
+    }
+  } catch (e) {}
+
+  try { document.documentElement.setAttribute("data-f19", "ativa"); } catch (e) {}
+})();
+</script>
 </body>
 </html>
