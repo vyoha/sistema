@@ -13749,5 +13749,423 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
   try { window.F21 = F21; window.f21_carregar = f21_carregar; } catch (e) {}
 })();
 </script>
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 22 · ABA VELHA PARA DE GRAVAR EM SILENCIO
+
+   Uma janela do vendedor ficou aberta desde antes da fase 7. Ele
+   registrou uma venda, a tela disse que deu certo, e a venda
+   apareceu na lista dele. No servidor nao existia.
+
+   O console daquela aba mostrava a build antiga batendo na porta
+   e voltando:
+
+     POST /rest/v1/sales      401 Unauthorized
+     POST /rest/v1/parcels    401 Unauthorized
+     POST /rest/v1/moves      401 Unauthorized
+     POST /rest/v1/products   403 Forbidden
+
+   E na propria sessao:
+
+     String(fecharVenda).indexOf("registrar_venda") >= 0   ->  false
+     document.documentElement.dataset                      ->  {}
+
+   Nenhum marcador de fase. A 'fecharVenda' que rodou foi a
+   legada, que grava com uid("v") no navegador. A venda ficou com
+   'numero: null' — numero e coisa que so o servidor da.
+
+   O PROBLEMA NAO E A BUILD VELHA EXISTIR. E ELA NAO AVISAR.
+   Tomou 401 em tudo, engoliu o erro e mostrou sucesso. Numa loja
+   onde o vendedor deixa a aba aberta a semana inteira, isso e
+   venda que desaparece — e ninguem descobre no dia.
+
+   O QUE ESTA CAMADA FAZ
+
+   1 · A pagina sabe a propria idade: compara a assinatura que
+       veio junto com ela contra o 'versao.txt' publicado no mesmo
+       lugar, lido sem cache.
+   2 · Defasada, ela DIZ: faixa no topo com botao de atualizar.
+   3 · Defasada, ela NAO GRAVA: 'Dados.chamar' — por onde passa
+       toda escrita no servidor — recusa e abre o aviso.
+   4 · Reconfere a cada 10 minutos e quando a aba volta ao foco.
+
+   NAO salva a aba ja aberta com build antiga: essa nao tem este
+   codigo. Vale da proxima publicacao em diante. E nao bloqueia
+   leitura — so escrita.
+
+   CONTRA FALSO POSITIVO: se o 'versao.txt' nao responder, vier
+   vazio ou 404, NAO considera defasado e nao bloqueia nada.
+   =============================================================== */
+(function () {
+  var F22_VERSAO = "2026-08-25-c";
+  var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
+
+  function f22_url() {
+    var base = location.pathname.replace(/[^/]*$/, "");
+    return base + "versao.txt?t=" + Date.now() + "-" + Math.random();
+  }
+
+  function f22_conferir() {
+    return fetch(f22_url(), { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (txt) {
+        if (txt == null) { return false; }
+        var v = String(txt).trim();
+        if (!v) { return false; }
+        F22.servidor = v;
+        F22.ultima = new Date().toISOString();
+        var defasada = (v !== F22_VERSAO);
+        if (defasada && !F22.defasada) { F22.defasada = true; f22_avisar(); }
+        return defasada;
+      })
+      .catch(function () { return false; });
+  }
+
+  function f22_avisar() {
+    if (document.getElementById("f22-faixa")) { return; }
+    var d = document.createElement("div");
+    d.id = "f22-faixa";
+    d.setAttribute("style",
+      "position:fixed;left:0;right:0;top:0;z-index:99999;background:#8a2b2b;color:#fff;" +
+      "padding:11px 16px;font:600 13.5px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;" +
+      "display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;" +
+      "box-shadow:0 2px 10px rgba(0,0,0,.25)");
+    d.innerHTML =
+      "<span>Esta página está desatualizada. Atualize antes de registrar qualquer coisa — " +
+      "o que for feito agora pode não ser salvo.</span>" +
+      '<button id="f22-btn" style="background:#fff;color:#8a2b2b;border:0;border-radius:8px;' +
+      'padding:7px 14px;font:700 13px system-ui;cursor:pointer">Atualizar agora</button>';
+    document.body.appendChild(d);
+    var b = document.getElementById("f22-btn");
+    if (b) { b.onclick = function () { location.reload(true); }; }
+    try { document.documentElement.setAttribute("data-f22", "defasada"); } catch (e) {}
+  }
+
+  function f22_modal() {
+    var msg = "Esta página foi carregada antes da versão atual do Vyoha System. " +
+              "Para não registrar nada que se perca, ela precisa ser atualizada primeiro.";
+    try {
+      if (typeof modal === "function") {
+        modal("Página desatualizada",
+          (typeof nota === "function" ? nota(msg, "wr") : "<p>" + msg + "</p>"),
+          '<button class="btn btn-p" onclick="location.reload(true)">Atualizar agora</button>');
+        return;
+      }
+    } catch (e) {}
+    try { alert(msg); } catch (e) {}
+  }
+
+  try {
+    if (typeof Dados !== "undefined" && typeof Dados.chamar === "function") {
+      var chamarAntigo = Dados.chamar;
+      Dados.chamar = function (funcao, argumentos) {
+        if (F22.defasada) {
+          f22_modal();
+          return Promise.resolve({ erro: "Esta página está desatualizada. Atualize antes de registrar." });
+        }
+        return chamarAntigo.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+
+  f22_conferir();
+  try { setInterval(f22_conferir, 10 * 60 * 1000); } catch (e) {}
+  try {
+    window.addEventListener("focus", function () {
+      if (!F22.ultima || (new Date() - new Date(F22.ultima)) > 60000) { f22_conferir(); }
+    });
+  } catch (e) {}
+
+  try {
+    window.F22 = F22;
+    window.f22_conferir = f22_conferir;
+    if (!F22.defasada) { document.documentElement.setAttribute("data-f22", F22_VERSAO); }
+  } catch (e) {}
+})();
+</script>
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 23 · A VENDA VOLTA A TER VALOR
+
+   Venda feita pela tela, produto de R$ 1.200,00 no carrinho:
+
+     Valor da venda R$ 0,00 · Saldo R$ 0,00 · 12x de R$ 0,00
+
+   O estoque baixa certo, o numero vem do servidor, o cliente
+   entra — so o dinheiro some.
+
+   A CAUSA
+
+   'calc()' calcula em variaveis LOCAIS e usa so para desenhar:
+
+     var bruto = r2(sum(draft.itens, i => i.preco * i.qtd));
+     var total = r2(bruto - draft.desconto);
+     var saldo = r2(Math.max(0, total - draft.entrada));
+     var vp    = np ? r2(saldo / np) : 0;
+
+   Grava de volta no 'draft' o desconto, a entrada, as parcelas, o
+   vencimento, a forma e a observacao — mas NAO grava 'bruto',
+   'total' nem 'valor_parcela'. E o 'draft' nasce sem esses tres.
+
+   Entao 'fecharVenda' monta o pedido com:
+
+     total: draft.total  ->  undefined
+     saldo = r2(draft.total - draft.entrada)  ->  NaN
+     vp    = r2(saldo / np)                   ->  NaN
+
+   O JSON leva null, o servidor guarda zero. A TELA MOSTRA O VALOR
+   CERTO o tempo todo, porque a tela usa as variaveis locais. So o
+   que viaja e que esta vazio — por isso passa despercebido.
+
+   POR QUE NAO APARECEU ANTES: nenhuma venda desta auditoria passou
+   pela tela. Todas foram chamadas diretas a 'registrar_venda' com
+   os valores escritos no proprio comando. A primeira venda feita
+   de verdade achou em um minuto o que nao apareceu em horas.
+
+   A CORRECAO: 'calc()' passa a gravar no 'draft' os quatro numeros
+   que ja calcula. Mesma formula. E 'fecharVenda' ganha uma tranca:
+   venda com total zero nao vai para o servidor.
+   =============================================================== */
+(function () {
+  var F23 = { calc: false, barradas: 0 };
+
+  try {
+    if (typeof calc === "function") {
+      var calcAntigo = calc;
+      calc = function () {
+        var r = calcAntigo.apply(this, arguments);
+        try {
+          if (!draft || !Array.isArray(draft.itens)) { return r; }
+          var bruto = r2(sum(draft.itens, function (i) { return i.preco * i.qtd; }));
+          var total = r2(bruto - (Number(draft.desconto) || 0));
+          var saldo = r2(Math.max(0, total - (Number(draft.entrada) || 0)));
+          var forma = String(draft.forma || "");
+          var avista = forma.indexOf("vista") >= 0 || forma.indexOf("Cartão") >= 0;
+          var np = avista ? 0 : (Number(draft.parcelas) || 0);
+          var vp = np ? r2(saldo / np) : 0;
+          draft.bruto = bruto;
+          draft.total = total;
+          draft.saldo = saldo;
+          draft.valor_parcela = vp;
+        } catch (e) {}
+        return r;
+      };
+      window.calc = calc;
+      F23.calc = true;
+    }
+  } catch (e) {}
+
+  try {
+    if (typeof fecharVenda === "function") {
+      var fecharAntigo = fecharVenda;
+      fecharVenda = function () {
+        try {
+          if (typeof calc === "function") { calc(); }
+          var t = Number(draft && draft.total);
+          if (!draft || !draft.itens || !draft.itens.length) {
+            return fecharAntigo.apply(this, arguments);
+          }
+          if (!isFinite(t) || t <= 0) {
+            F23.barradas++;
+            var e = (typeof el === "function") ? el("d-err") : null;
+            var msg = "O valor da venda está zerado. Confira os produtos e o desconto antes de finalizar.";
+            if (e) {
+              e.innerHTML = "<span style='width:17px'>" + (typeof ICON !== "undefined" ? ICON.alert : "!") +
+                            "</span><div>" + msg + "</div>";
+              e.classList.remove("hidden");
+            } else if (typeof toast === "function") { toast(msg, "err"); }
+            return;
+          }
+        } catch (err) {}
+        return fecharAntigo.apply(this, arguments);
+      };
+      window.fecharVenda = fecharVenda;
+    }
+  } catch (e) {}
+
+  try {
+    window.F23 = F23;
+    document.documentElement.setAttribute("data-f23", F23.calc ? "ativa" : "sem-calc");
+  } catch (e) {}
+})();
+</script>
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 24 · A VENDA DO VENDEDOR FICA DO TAMANHO
+   DO TRABALHO DELE
+
+   REGRA DO NEGOCIO
+
+     · o crediario e um so — nao ha o que escolher
+     · sao 12 parcelas, sempre — nao ha o que digitar
+     · o valor da parcela e consequencia, nunca digitacao
+     · cliente novo nao se cadastra por um segundo formulario:
+       usa o caminho da Analise de Credito
+
+   O QUE A TELA PEDIA ANTES, AO VENDEDOR
+
+     Parcelas            select de 1, 3, 6, 10, 12, 15, 18, 24, 30, 36
+     Forma de pagamento  5 opcoes, incluindo a vista e cartao
+     Responsavel         select de usuarios (ja vinha travado)
+     Cadastrar na hora   um formulario de cliente inteiro, o
+                         terceiro do sistema, sem as perguntas que
+                         o crediario exige
+
+   Decisao a mais para quem so precisa vender, e uma porta para
+   vender no crediario sem analise nenhuma.
+
+   O QUE ESTA CAMADA FAZ — SO PARA O PERFIL VENDEDOR
+
+   1 · Parcelas somem da tela e valem 12, fixo.
+   2 · Forma de pagamento some e vale o crediario unico.
+   3 · Responsavel some — ja era ele mesmo.
+   4 · O formulario duplicado de cliente some. No lugar, o caminho
+       certo: Analise de Credito.
+
+   O ADMINISTRADOR NAO MUDA: continua com desconto, entrada,
+   prazo, forma e responsavel, porque quem negocia excecao e ele.
+
+   POR QUE MANDAR PARA A ANALISE E NAO COPIAR O FORMULARIO
+
+   Copiar seria criar o quarto formulario de cliente. E vender no
+   crediario sem analise e o risco que a Analise existe para
+   evitar: a loja fia para quem nao conhece. O cliente e cadastrado
+   uma vez, com endereco, trabalho, renda e referencias — e quando
+   aprova, ja nasce pronto para a venda.
+
+   Nenhuma tela e reescrita: a camada mexe no formulario depois
+   que ele aparece.
+   =============================================================== */
+(function () {
+  var F24 = { aplicou: 0 };
+  var PARCELAS_FIXAS = 12;
+  var CREDIARIO      = "Entrada + crediário";
+
+  function f24_ehVendedor() {
+    try { return typeof isVend === "function" && isVend(); } catch (e) { return false; }
+  }
+
+  function f24_caixa(id) {
+    var e = document.getElementById(id);
+    if (!e) { return null; }
+    var p = e;
+    for (var i = 0; i < 4 && p; i++) {
+      if (p.classList && p.classList.contains("fld")) { return p; }
+      p = p.parentElement;
+    }
+    return null;
+  }
+
+  function f24_esconder(id) {
+    var c = f24_caixa(id);
+    if (c) { c.style.display = "none"; }
+  }
+
+  function f24_avisoAnalise() {
+    var txt = "Cliente novo entra pela <b>Análise de crédito</b>. É lá que ficam endereço, " +
+              "trabalho, renda e referências — o que o crediário precisa saber antes de fiar. " +
+              "Aprovada a análise, o cliente aparece nesta lista pronto para vender.";
+    var botao = '<button class="btn btn-p" style="margin-top:12px" ' +
+                'onclick="fecharModal();ir(&quot;analises&quot;)">Abrir Análise de crédito</button>';
+    try { if (typeof nota === "function") { return nota(txt, "inf") + botao; } } catch (e) {}
+    return '<div class="note inf" style="margin:0 0 12px">' + txt + "</div>" + botao;
+  }
+
+  function f24_ajustar() {
+    if (!f24_ehVendedor()) { return; }
+    if (!document.getElementById("d-parc")) { return; }
+
+    try {
+      var p = document.getElementById("d-parc");
+      if (p) { p.value = String(PARCELAS_FIXAS); }
+      if (typeof draft !== "undefined" && draft) { draft.parcelas = PARCELAS_FIXAS; }
+      f24_esconder("d-parc");
+    } catch (e) {}
+
+    try {
+      var f = document.getElementById("d-forma");
+      if (f) {
+        var achou = false;
+        for (var i = 0; i < f.options.length; i++) {
+          if (f.options[i].value === CREDIARIO || f.options[i].text === CREDIARIO) { f.selectedIndex = i; achou = true; break; }
+        }
+        if (!achou) { f.selectedIndex = 0; }
+      }
+      if (typeof draft !== "undefined" && draft) { draft.forma = CREDIARIO; }
+      f24_esconder("d-forma");
+    } catch (e) {}
+
+    f24_esconder("d-sel");
+
+    try {
+      var no = document.getElementById("md-no");
+      if (no && no.parentElement) { no.parentElement.style.display = "none"; }
+      var n2 = document.getElementById("cli-novo");
+      if (n2) { n2.classList.remove("hidden"); n2.innerHTML = f24_avisoAnalise(); }
+      var e2 = document.getElementById("cli-existente");
+      if (e2) { e2.classList.remove("hidden"); }
+      if (typeof draft !== "undefined" && draft) { draft.modo = "existente"; }
+    } catch (e) {}
+
+    try { if (typeof calc === "function") { calc(); } } catch (e) {}
+    F24.aplicou++;
+  }
+
+  try {
+    if (typeof modalVenda === "function") {
+      var modalVendaAntiga = modalVenda;
+      modalVenda = function () {
+        var r = modalVendaAntiga.apply(this, arguments);
+        try { f24_ajustar(); } catch (e) {}
+        return r;
+      };
+      window.modalVenda = modalVenda;
+    }
+  } catch (e) {}
+
+  try {
+    if (typeof modoCliente === "function") {
+      var modoAntigo = modoCliente;
+      modoCliente = function (m) {
+        var r = modoAntigo.apply(this, arguments);
+        try {
+          if (f24_ehVendedor()) {
+            var n = document.getElementById("cli-novo");
+            if (n) { n.classList.remove("hidden"); n.innerHTML = f24_avisoAnalise(); }
+            var e = document.getElementById("cli-existente");
+            if (e) { e.classList.remove("hidden"); }
+            if (typeof draft !== "undefined" && draft) { draft.modo = "existente"; }
+          }
+        } catch (err) {}
+        return r;
+      };
+      window.modoCliente = modoCliente;
+    }
+  } catch (e) {}
+
+  try {
+    if (typeof fecharVenda === "function") {
+      var fecharAntigo24 = fecharVenda;
+      fecharVenda = function () {
+        try {
+          if (f24_ehVendedor() && typeof draft !== "undefined" && draft) {
+            draft.parcelas = PARCELAS_FIXAS;
+            draft.forma = CREDIARIO;
+            draft.modo = "existente";
+            if (typeof calc === "function") { calc(); }
+          }
+        } catch (e) {}
+        return fecharAntigo24.apply(this, arguments);
+      };
+      window.fecharVenda = fecharVenda;
+    }
+  } catch (e) {}
+
+  try {
+    window.F24 = F24;
+    document.documentElement.setAttribute("data-f24", "ativa");
+  } catch (e) {}
+})();
+</script>
 </body>
 </html>
