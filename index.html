@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-25-d";
+  var F22_VERSAO = "2026-08-25-e";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -14431,6 +14431,486 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     window.F25 = F25;
     window.f25_aplicar = f25_aplicar;
     document.documentElement.setAttribute("data-f25marca", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 26 · O CADASTRO DO VENDEDOR PERGUNTA O QUE
+   O CREDIARIO PRECISA SABER
+
+   O QUE A NANDA PEDIU
+
+   "formulario de cadastro deve ter os mesmos campos de analise de
+    credito - mesma coisa deve ser preenchida"
+
+   "na aba de clientes e produtos ainda tem um resumo em cima como
+    se fosse um dashboard inicial que nao e necessario"
+
+   POR QUE A FASE 24 NAO RESOLVEU
+
+   A fase 24 tirou o formulario duplicado e pos no lugar um aviso
+   com o botao "Abrir Analise de credito". Estava funcionando —
+   conferi na tela, com o perfil forcado a vendedor: o `cli-novo`
+   virava o aviso, `nv-nome` deixava de existir. So que mandar o
+   vendedor para outra tela nao e o que ela pediu. O que ela quer
+   e o formulario ali, com as mesmas perguntas.
+
+   Faz sentido: quem esta no balcao nao vai parar a venda, abrir
+   outra tela, preencher trinta campos e voltar. Ele preenche uma
+   vez, no lugar onde ja esta.
+
+   ---------------------------------------------------------------
+   PARTE 1 · O CADASTRO NA HORA PASSA A PERGUNTAR TUDO
+
+   O formulario antigo do modal de venda pedia doze campos:
+
+     nome, cpf, telefone, nascimento, e-mail, endereco, bairro,
+     cep, cidade, uf, profissao, como chegou
+
+   A Analise de Credito pergunta trinta, e sao esses trinta que
+   decidem se a loja fia ou nao:
+
+     identificacao   nome, cpf, nascimento, dois telefones
+     moradia         cep, endereco, bairro, cidade, uf,
+                     dois pontos de referencia, se a casa e
+                     propria, ha quanto tempo mora ali
+     trabalho        funcao, empresa, endereco e bairro do
+                     trabalho, ponto de referencia do trabalho
+     renda           renda mensal, quantas pessoas trabalham em
+                     casa, renda da casa somada
+     referencias     endereco de um parente e tres contatos com
+                     nome, parentesco e telefone
+     pagamento       melhor dia para pagar
+
+   Agora sao esses os campos do "Cadastrar na hora" — os mesmos,
+   com os mesmos textos e as mesmas opcoes do formulario publico.
+
+   O ENDERECO COMECA PELO CEP, como no formulario de analise:
+   digitou, o resto se preenche sozinho; nao sabe, marca a caixa e
+   escreve a mao.
+
+   ONDE AS RESPOSTAS FICAM
+
+   Os doze campos antigos mantiveram os mesmos `id` (`nv-nome`,
+   `nv-cpf`, ...), entao a funcao que cria o cliente continua
+   funcionando sem saber que a tela mudou.
+
+   As dezoito respostas novas entram no cadastro do cliente dentro
+   de `dados.credito`, por um envelope em volta do `Dados.criar`.
+   Nada e sobrescrito: o que ja ia continua indo, e o resto viaja
+   junto.
+
+   ---------------------------------------------------------------
+   PARTE 2 · CLIENTES E PRODUTOS SEM O PAINEL DE GESTAO
+
+   As duas telas abrem com quatro indicadores:
+
+     Clientes   Cadastros · Novos no mes · Cadastro completo ·
+                Em cobranca
+     Produtos   Itens disponiveis · Valor em estoque ·
+                Precisam de reposicao · Mais vendido (90 dias)
+
+   Valor de estoque a preco de custo e clientes em cobranca sao
+   leitura de quem administra. Saem da tela do vendedor, como ja
+   sairam da tela de Vendas na fase 25.
+
+   ---------------------------------------------------------------
+   O ADMINISTRADOR NAO MUDA. Tudo aqui esta atras de `isVend()`.
+
+   COMO ESTA CAMADA CONVIVE COM A 24
+
+   A fase 24 continua mandando em tres coisas — 12 parcelas, um
+   crediario so, responsavel travado — e isso fica. So o item 4
+   dela, o aviso no lugar do formulario, e desfeito aqui.
+
+   Um detalhe: a fase 24 forca `draft.modo = "existente"` dentro do
+   `fecharVenda`, e ela roda depois desta camada na fila. Em vez de
+   brigar pela ordem, esta camada poe uma tranca no proprio
+   `draft.modo`: enquanto o vendedor tiver escolhido "Cadastrar na
+   hora", ninguem consegue mudar para "existente".
+
+   Nenhuma tela e reescrita.
+   =============================================================== */
+(function () {
+
+  var F26 = { form: 0, escolhido: "existente", gravou: 0, painel: 0 };
+
+  function f26_ehVendedor() {
+    try { return typeof isVend === "function" && isVend(); } catch (e) { return false; }
+  }
+  function g(id) { return document.getElementById(id); }
+  function so(x) { return String(x == null ? "" : x); }
+  function dg(s) { return so(s).replace(/\D/g, ""); }
+  function vv(id) { var e = g(id); return e ? so(e.value).trim() : ""; }
+
+  /* =============================================================
+     PARTE 1 · o formulario
+     ============================================================= */
+
+  var MORADIA = [["", "Escolha"], ["propria", "Própria"], ["alugada", "Alugada"],
+                 ["familiar", "De familiar"], ["cedida", "Cedida"]];
+  var TEMPO = [["", "Escolha"], ["menos de 1 ano", "Menos de 1 ano"], ["1 a 3 anos", "1 a 3 anos"],
+               ["3 a 10 anos", "3 a 10 anos"], ["mais de 10 anos", "Mais de 10 anos"]];
+  var QUANTOS = [["", "Escolha"], ["1", "1"], ["2", "2"], ["3", "3"], ["4 ou mais", "4 ou mais"]];
+  var DIAS = [["", "Escolha"], ["5", "5"], ["10", "10"], ["15", "15"], ["20", "20"], ["25", "25"], ["30", "30"]];
+
+  function opts(lista, atual) {
+    return lista.map(function (o) {
+      return '<option value="' + o[0] + '"' + (o[0] === atual ? " selected" : "") + ">" + o[1] + "</option>";
+    }).join("");
+  }
+  function campo(id, rot, extra, obrig) {
+    return '<div class="fld"><label>' + rot + (obrig ? ' <span class="rq">*</span>' : "") +
+      "</label><input id=\"" + id + "\" " + (extra || "") + "></div>";
+  }
+  function selec(id, rot, lista) {
+    return '<div class="fld"><label>' + rot + ' <span class="rq">*</span></label><select id="' + id + '">' +
+      opts(lista, "") + "</select></div>";
+  }
+  function titulo(t) {
+    return '<div class="lg-eyebrow" style="margin:18px 0 10px">' + t + "</div>";
+  }
+
+  function f26_html() {
+    var cid = "", uf = "";
+    try { cid = so(org().cidade); uf = so(org().uf); } catch (e) {}
+
+    return "" +
+      '<div class="hp" style="margin:0 0 14px">Estas são as mesmas perguntas da <b>Análise de crédito</b>. ' +
+      "Preencha com o cliente ao lado — é isto que a loja olha antes de fiar.</div>" +
+
+      titulo("Quem é o cliente") +
+      '<div class="rw rw2">' +
+        campo("nv-nome", "Nome completo", 'placeholder="Nome do comprador"', 1) +
+        campo("nv-cpf", "CPF", 'maxlength="14" placeholder="000.000.000-00" onblur="checarCpfVenda()"', 1) +
+      "</div>" +
+      '<div id="nv-alerta"></div>' +
+      '<div class="rw rw3">' +
+        campo("nv-tel", "Telefone 1", 'placeholder="(00) 00000-0000"', 1) +
+        campo("n26-fone2", "Telefone 2", 'placeholder="Outro caminho para achar"', 1) +
+        campo("nv-nasc", "Nascimento", 'type="date"', 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("nv-mail", "E-mail", 'type="email"') +
+        '<div class="fld"><label>Como chegou</label><select id="nv-org">' +
+          ["Loja física", "Indicação", "Redes sociais", "Site", "WhatsApp"].map(function (o) {
+            return "<option>" + o + "</option>"; }).join("") + "</select></div>" +
+      "</div>" +
+
+      titulo("Onde mora") +
+      '<div class="rw rw3">' +
+        campo("nv-cep", "CEP", 'inputmode="numeric" maxlength="9" placeholder="00000-000"') +
+        '<div class="fld" style="align-self:end;padding-bottom:9px">' +
+          '<label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:500">' +
+          '<input type="checkbox" id="n26-sem-cep" style="width:auto;margin:0"> Não sei o CEP</label></div>' +
+        '<div class="fld"><label>&nbsp;</label><div class="sm mut" id="nv-cep-msg">O endereço se preenche sozinho.</div></div>' +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("nv-end", "Endereço", 'placeholder="Rua, número"', 1) +
+        campo("nv-bairro", "Bairro", "", 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("nv-cid", "Cidade", 'value="' + cid.replace(/"/g, "&quot;") + '"', 1) +
+        campo("nv-uf", "UF", 'maxlength="2" value="' + uf.replace(/"/g, "&quot;") + '"') +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("n26-ref1", "Ponto de referência 1", 'placeholder="Perto de..."', 1) +
+        campo("n26-ref2", "Ponto de referência 2", "", 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        selec("n26-moradia", "A casa é própria?", MORADIA) +
+        selec("n26-tempo-casa", "Há quanto tempo mora aí?", TEMPO) +
+      "</div>" +
+
+      titulo("Trabalho e renda") +
+      '<div class="rw rw2">' +
+        campo("nv-prof", "Em que trabalha", 'placeholder="Função"', 1) +
+        campo("n26-empresa", "Nome da empresa", "", 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("n26-end-trab", "Endereço do trabalho", "", 1) +
+        campo("n26-bairro-trab", "Bairro do trabalho", "", 1) +
+      "</div>" +
+      campo("n26-ref-trab", "Ponto de referência do trabalho", "", 1) +
+      '<div class="rw rw3">' +
+        campo("n26-renda", "Renda mensal (R$)", 'inputmode="decimal" placeholder="0,00"', 1) +
+        selec("n26-quantos", "Quantas pessoas trabalham em casa", QUANTOS) +
+        campo("n26-renda-casa", "Renda da casa somada (R$)", 'inputmode="decimal" placeholder="0,00"', 1) +
+      "</div>" +
+
+      titulo("Referências") +
+      '<div class="hp" style="margin:0 0 12px">Três contatos de pessoas próximas e o endereço de um parente. ' +
+      "É o que mais pesa na análise.</div>" +
+      campo("n26-end-parente", "Endereço de um parente", 'placeholder="Rua, número, bairro, cidade"', 1) +
+      '<div class="rw rw2">' +
+        campo("n26-ref-n1", "Contato 1 — nome e parentesco", 'placeholder="Ex.: Maria, irmã"', 1) +
+        campo("n26-ref-t1", "Telefone do contato 1", 'placeholder="(00) 00000-0000"', 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("n26-ref-n2", "Contato 2 — nome e parentesco", "", 1) +
+        campo("n26-ref-t2", "Telefone do contato 2", "", 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("n26-ref-n3", "Contato 3 — nome e parentesco", "", 1) +
+        campo("n26-ref-t3", "Telefone do contato 3", "", 1) +
+      "</div>" +
+
+      titulo("Pagamento") +
+      '<div class="rw rw2">' +
+        selec("n26-dia", "Melhor dia para pagar", DIAS) +
+        '<div class="fld"><label>Quer registrar mais alguma coisa</label><input id="n26-obs" placeholder="Opcional"></div>' +
+      "</div>";
+  }
+
+  /* ---------- CEP ---------- */
+  function f26_cep() {
+    var c = g("nv-cep"), msg = g("nv-cep-msg"), sem = g("n26-sem-cep");
+    if (!c) { return; }
+    if (sem) {
+      sem.onchange = function () {
+        c.disabled = !!sem.checked;
+        if (msg) { msg.textContent = sem.checked ? "Preencha o endereço na mão." : "O endereço se preenche sozinho."; }
+      };
+    }
+    c.oninput = function () {
+      var d = dg(c.value).substring(0, 8);
+      c.value = d.length > 5 ? d.substring(0, 5) + "-" + d.substring(5) : d;
+      if (d.length !== 8) { return; }
+      if (msg) { msg.textContent = "Procurando…"; }
+      fetch("https://viacep.com.br/ws/" + d + "/json/")
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (!j || j.erro) { if (msg) { msg.textContent = "CEP não encontrado."; } return; }
+          if (g("nv-end") && j.logradouro) { g("nv-end").value = j.logradouro; }
+          if (g("nv-bairro") && j.bairro) { g("nv-bairro").value = j.bairro; }
+          if (g("nv-cid") && j.localidade) { g("nv-cid").value = j.localidade; }
+          if (g("nv-uf") && j.uf) { g("nv-uf").value = j.uf; }
+          if (msg) { msg.textContent = "Confira e complete o número."; }
+          var e = g("nv-end"); if (e) { try { e.focus(); } catch (x) {} }
+        })
+        .catch(function () { if (msg) { msg.textContent = "Não consegui consultar — pode preencher na mão."; } });
+    };
+  }
+
+  /* ---------- o que falta ---------- */
+  var OBRIGATORIOS = [
+    ["nv-nome", "nome completo"], ["nv-cpf", "CPF"], ["nv-tel", "telefone 1"],
+    ["n26-fone2", "telefone 2"], ["nv-nasc", "data de nascimento"],
+    ["nv-end", "endereço"], ["nv-bairro", "bairro"], ["nv-cid", "cidade"],
+    ["n26-ref1", "ponto de referência 1"], ["n26-ref2", "ponto de referência 2"],
+    ["n26-moradia", "se a casa é própria"], ["n26-tempo-casa", "há quanto tempo mora aí"],
+    ["nv-prof", "em que trabalha"], ["n26-empresa", "nome da empresa"],
+    ["n26-end-trab", "endereço do trabalho"], ["n26-bairro-trab", "bairro do trabalho"],
+    ["n26-ref-trab", "ponto de referência do trabalho"],
+    ["n26-renda", "renda mensal"], ["n26-quantos", "quantas pessoas trabalham em casa"],
+    ["n26-renda-casa", "renda da casa somada"],
+    ["n26-end-parente", "endereço de um parente"],
+    ["n26-ref-n1", "contato 1"], ["n26-ref-t1", "telefone do contato 1"],
+    ["n26-ref-n2", "contato 2"], ["n26-ref-t2", "telefone do contato 2"],
+    ["n26-ref-n3", "contato 3"], ["n26-ref-t3", "telefone do contato 3"],
+    ["n26-dia", "melhor dia para pagar"]
+  ];
+
+  function f26_faltando() {
+    var falta = [];
+    OBRIGATORIOS.forEach(function (o) { if (!vv(o[0])) { falta.push(o[1]); } });
+    return falta;
+  }
+
+  function f26_respostas() {
+    return {
+      telefone2: vv("n26-fone2"),
+      cep: vv("nv-cep"),
+      referencia1: vv("n26-ref1"), referencia2: vv("n26-ref2"),
+      moradia: vv("n26-moradia"), tempo_casa: vv("n26-tempo-casa"),
+      empresa: vv("n26-empresa"),
+      endereco_trabalho: vv("n26-end-trab"), bairro_trabalho: vv("n26-bairro-trab"),
+      referencia_trabalho: vv("n26-ref-trab"),
+      renda: vv("n26-renda"), pessoas_trabalham: vv("n26-quantos"), renda_casa: vv("n26-renda-casa"),
+      endereco_parente: vv("n26-end-parente"),
+      contatos: [
+        { nome: vv("n26-ref-n1"), tel: vv("n26-ref-t1") },
+        { nome: vv("n26-ref-n2"), tel: vv("n26-ref-t2") },
+        { nome: vv("n26-ref-n3"), tel: vv("n26-ref-t3") }
+      ],
+      melhor_dia: vv("n26-dia"),
+      obs: vv("n26-obs"),
+      preenchido_na_venda: true
+    };
+  }
+
+  /* ---------- desenhar ---------- */
+  function f26_montar() {
+    if (!f26_ehVendedor()) { return; }
+    var alvo = g("cli-novo");
+    if (!alvo) { return; }
+    if (!g("n26-ref1")) {
+      alvo.innerHTML = f26_html();
+      f26_cep();
+      F26.form++;
+    }
+    /* a fase 24 escondia a aba "Cadastrar na hora" — ela volta */
+    var no = g("md-no");
+    if (no && no.parentElement) { no.parentElement.style.display = ""; }
+    alvo.classList.toggle("hidden", F26.escolhido !== "novo");
+    var ex = g("cli-existente");
+    if (ex) { ex.classList.toggle("hidden", F26.escolhido === "novo"); }
+  }
+
+  /* ---------- a tranca do draft.modo ----------
+     a fase 24 forca "existente" dentro do fecharVenda e roda
+     depois desta camada; a tranca resolve sem depender de ordem */
+  function f26_trancar() {
+    try {
+      if (typeof draft === "undefined" || !draft) { return; }
+      var d = Object.getOwnPropertyDescriptor(draft, "modo");
+      if (d && d.get) { return; }
+      var val = draft.modo;
+      Object.defineProperty(draft, "modo", {
+        configurable: true, enumerable: true,
+        get: function () { return val; },
+        set: function (novo) {
+          if (F26.escolhido === "novo" && novo === "existente" && f26_ehVendedor()) { return; }
+          val = novo;
+        }
+      });
+    } catch (e) {}
+  }
+
+  /* =============================================================
+     PARTE 2 · Clientes e Produtos sem o painel
+     ============================================================= */
+  function f26_semPainel(pagina) {
+    if (!f26_ehVendedor()) { return; }
+    if (pagina !== "clientes" && pagina !== "produtos") { return; }
+    var page = g("page") || document.querySelector(".page");
+    if (!page) { return; }
+    var grade = page.querySelector(".grid.c4");
+    if (grade && /Cadastros|Itens disponíveis|Valor em estoque|Valor do catálogo/.test(grade.textContent || "")) {
+      grade.parentNode.removeChild(grade);
+      F26.painel++;
+    }
+    try {
+      var bs = page.querySelectorAll(".head button");
+      for (var i = 0; i < bs.length; i++) {
+        if (/Exportar/.test(bs[i].textContent || "")) { bs[i].style.display = "none"; }
+      }
+    } catch (e) {}
+  }
+
+  /* =============================================================
+     os enganches
+     ============================================================= */
+
+  /* o modal — esta camada embrulha a 24, entao roda depois dela */
+  try {
+    if (typeof modalVenda === "function") {
+      var modalAntigo26 = modalVenda;
+      modalVenda = function () {
+        var r = modalAntigo26.apply(this, arguments);
+        try {
+          if (f26_ehVendedor()) {
+            F26.escolhido = "existente";
+            f26_trancar();
+            f26_montar();
+          }
+        } catch (e) {}
+        return r;
+      };
+      window.modalVenda = modalVenda;
+    }
+  } catch (e) {}
+
+  /* trocar de aba */
+  try {
+    if (typeof modoCliente === "function") {
+      var modoAntigo26 = modoCliente;
+      modoCliente = function (m) {
+        F26.escolhido = (m === "novo") ? "novo" : "existente";
+        var r;
+        try { r = modoAntigo26.apply(this, arguments); } catch (e) {}
+        try {
+          if (f26_ehVendedor()) {
+            try { draft.modo = F26.escolhido; } catch (x) {}
+            f26_montar();
+            var a = g("md-ex"), b = g("md-no");
+            if (a) { a.classList.toggle("on", F26.escolhido !== "novo"); }
+            if (b) { b.classList.toggle("on", F26.escolhido === "novo"); }
+          }
+        } catch (e) {}
+        return r;
+      };
+      window.modoCliente = modoCliente;
+    }
+  } catch (e) {}
+
+  /* nao deixar concluir a venda com a analise pela metade */
+  try {
+    if (typeof fecharVenda === "function") {
+      var fecharAntigo26 = fecharVenda;
+      fecharVenda = function () {
+        try {
+          if (f26_ehVendedor() && F26.escolhido === "novo" && g("nv-cep")) {
+            var falta = f26_faltando();
+            if (falta.length) {
+              var e = g("d-err");
+              var msg = "Faltam " + falta.length + " campo(s) do cadastro: " +
+                        falta.slice(0, 6).join(", ") + (falta.length > 6 ? " e outros." : ".");
+              if (e) {
+                e.innerHTML = "<span style='width:17px'>" +
+                  (typeof ICON !== "undefined" ? ICON.alert : "!") + "</span><div>" + msg + "</div>";
+                e.classList.remove("hidden");
+              } else if (typeof toast === "function") { toast(msg, "er"); }
+              return;
+            }
+          }
+        } catch (err) {}
+        return fecharAntigo26.apply(this, arguments);
+      };
+      window.fecharVenda = fecharVenda;
+    }
+  } catch (e) {}
+
+  /* as respostas viajam junto com o cliente */
+  try {
+    if (typeof Dados !== "undefined" && typeof Dados.criar === "function") {
+      var criarAntigo26 = Dados.criar;
+      Dados.criar = function (tabela, registro) {
+        try {
+          if (tabela === "customers" && registro && registro.dados &&
+              f26_ehVendedor() && g("nv-cep")) {
+            registro.dados.credito = f26_respostas();
+            if (!registro.dados.tel2) { registro.dados.tel2 = vv("n26-fone2"); }
+            if (!registro.dados.cep) { registro.dados.cep = vv("nv-cep"); }
+            F26.gravou++;
+          }
+        } catch (e) {}
+        return criarAntigo26.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+
+  /* as telas */
+  try {
+    if (typeof ir === "function") {
+      var irAntigo26 = ir;
+      ir = function (p) {
+        var r = irAntigo26.apply(this, arguments);
+        try { f26_semPainel(String(p || "")); } catch (e) {}
+        return r;
+      };
+      window.ir = ir;
+    }
+  } catch (e) {}
+
+  try {
+    window.F26 = F26;
+    window.f26_faltando = f26_faltando;
+    window.f26_respostas = f26_respostas;
+    document.documentElement.setAttribute("data-f26", "ativa");
   } catch (e) {}
 })();
 
