@@ -13504,5 +13504,228 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
   try { document.documentElement.setAttribute("data-f19", "ativa"); } catch (e) {}
 })();
 </script>
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 20 · A REDE VOLTA A FALAR COM O SERVIDOR
+
+   As telas da rede (Panorama, Empresas, Indicadores, Ranking,
+   Financeiro, Alertas) buscavam os numeros por duas funcoes:
+
+     pedirRedeNuvem(ini, fim)  ->  nuvemPedido("/rest/v1/rpc/rede_numeros")
+     pedirMesesRede()          ->  nuvemPedido("/rest/v1/rpc/rede_meses")
+
+   Duas coisas as impediam de funcionar:
+
+   1 · 'nuvemPedido' e o caminho REST da era anterior — o mesmo
+       que a fase 14 ja teve de trocar no link da loja. Nao
+       carrega o token da sessao autenticada.
+
+   2 · 'redeNaNuvem()' exigia 'SYNC.ligado && nuvemViva()'. Com o
+       SYNC desligado a funcao devolvia falso e as telas caiam no
+       calculo LOCAL, que so enxerga a propria empresa. Numa rede
+       isso e o pior dos mundos: nao da erro, da numero errado.
+
+   Esta camada troca o transporte, e so o transporte. As mesmas
+   duas RPCs, com os mesmos parametros, agora pela conexao
+   autenticada 'Sessao.conexao().rpc(...)'.
+
+   NENHUMA TELA E REESCRITA. 'numerosDaEmpresa', 'numerosDaRede',
+   'faturamentoPeriodo', 'espelharEmpresasRede' e 'linhaParaNumeros'
+   continuam como estao — ja liam de 'REDE.por' e 'REDE.meses'.
+
+   ISOLAMENTO POR EMPRESA — conferido em producao com o gestor do
+   Grupo Lucena logado e a Pilar vinculada a rede:
+
+     rede_numeros(ini, fim) ...... devolve a linha da Pilar (numeros)
+     sales, parcels, customers,
+     products, cash, moves,
+     analises, restricoes ........ 0 linhas
+     consulta direta as vendas
+     da Pilar por tenant_id ...... 0 linhas
+
+   O gestor da rede recebe NUMEROS, nunca linhas de operacao. Quem
+   decide isso e o servidor, nao este arquivo.
+   =============================================================== */
+(function () {
+  function f20_conexao() {
+    try {
+      if (typeof Sessao === "undefined" || !Sessao.conexao) { return null; }
+      return Sessao.conexao();
+    } catch (e) { return null; }
+  }
+  try {
+    redeNaNuvem = function () {
+      if (typeof isHolding !== "function" || !isHolding()) { return false; }
+      return !!f20_conexao();
+    };
+    window.redeNaNuvem = redeNaNuvem;
+  } catch (e) {}
+  try {
+    pedirRedeNuvem = function (ini, fim) {
+      var k = chaveRede(ini, fim);
+      if (!redeNaNuvem() || REDE.buscando[k]) { return; }
+      var c = f20_conexao();
+      if (!c) { return; }
+      REDE.buscando[k] = true;
+      c.rpc("rede_numeros", { ini: ini, fim: fim }).then(function (r) {
+        REDE.buscando[k] = false;
+        if (r.error) { REDE.erro = "Não foi possível falar com o servidor agora."; return; }
+        REDE.erro = "";
+        REDE.por[k] = r.data || [];
+        REDE.em = new Date().toISOString();
+        if (espelharEmpresasRede(REDE.por[k])) { save(); }
+        repintar();
+      }).catch(function () {
+        REDE.buscando[k] = false;
+        REDE.erro = "Não foi possível falar com o servidor agora.";
+      });
+    };
+    window.pedirRedeNuvem = pedirRedeNuvem;
+  } catch (e) {}
+  try {
+    pedirMesesRede = function () {
+      if (!redeNaNuvem() || REDE.buscando.meses) { return; }
+      var c = f20_conexao();
+      if (!c) { return; }
+      REDE.buscando.meses = true;
+      var desde = mIni(addM(today(), -11));
+      c.rpc("rede_meses", { desde: desde }).then(function (r) {
+        REDE.buscando.meses = false;
+        if (r.error) { return; }
+        REDE.meses = r.data || [];
+        repintar();
+      }).catch(function () { REDE.buscando.meses = false; });
+    };
+    window.pedirMesesRede = pedirMesesRede;
+  } catch (e) {}
+  try { document.documentElement.setAttribute("data-f20", "ativa"); } catch (e) {}
+})();
+</script>
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 21 · A EMPRESA VOLTA A SE RECONHECER
+
+   Ao entrar como gestor da rede, a primeira tela mostrava:
+
+     Configuracoes — Central de configuracao de Vyoha
+     Nome da empresa: Vyoha
+
+   Nao e a empresa dele. E o texto de emergencia de 'org()':
+
+     return find(DB.tenants, T()) ||
+            { nome: "Vyoha", slug: "app", cidade: "", uf: "", cnpj: "" };
+
+   Medido ao vivo na sessao do gestor:
+
+     perfil ....... holding
+     T() .......... t72875b600746      (certo)
+     DB.tenants ... []                  (vazio)
+     org().nome ... "Vyoha"             (o fallback)
+
+   DB.tenants nunca era preenchido a partir do servidor. Nenhuma
+   carga do System buscava a propria empresa. Quem dependia disso:
+
+     org()              nome, cidade, UF, CNPJ, slug, monograma
+     limiteContratado() limites de admins, PDVs e operacionais
+     usoLicenca()       "3 de 5 PDVs" na tela de equipe
+     ehHolding()        se este ambiente e uma rede
+     vagasRede()        quantas empresas cabem na rede
+
+   Com a lista vazia tudo isso caia no LIMITES_PADRAO: a empresa
+   se chamava Vyoha e os limites nao eram os contratados.
+
+   A tabela 'public.empresas' ja existe e a RLS ja devolve so o
+   que aquele acesso pode ver. A camada le e preenche DB.tenants.
+   Nenhuma tela e reescrita.
+
+   VALIDADO EM PRODUCAO, sessao do gestor do Grupo Lucena:
+
+     org()              Grupo Lucena
+     tipo               holding
+     limite admins      2      (contratado, nao o padrao)
+     limite empresas    5
+     limite PDVs        0      (correto para holding)
+
+   ISOLAMENTO: nao e este arquivo que decide o que aparece, e a
+   RLS de 'empresas'. A camada le o que o servidor entrega, sem
+   filtro proprio e sem inventar linha.
+   =============================================================== */
+(function () {
+  var F21 = { carregou: false, empresas: 0, erro: null };
+  function f21_conexao() {
+    try {
+      if (typeof Sessao === "undefined" || !Sessao.conexao) { return null; }
+      return Sessao.conexao();
+    } catch (e) { return null; }
+  }
+  function f21_montar(linha) {
+    var d = linha.dados || {};
+    var t = {};
+    for (var k in d) { if (Object.prototype.hasOwnProperty.call(d, k)) { t[k] = d[k]; } }
+    t.id        = linha.tenant_id;
+    t.nome      = linha.nome || d.nome || "";
+    t.matriz_id = linha.matriz_id || null;
+    t.token     = linha.token || null;
+    t.email     = linha.email_admin || d.email || "";
+    t.status    = linha.ativo === false ? "inativo" : "ativo";
+    t.daNuvem   = true;
+    return t;
+  }
+  function f21_aplicar(linhas) {
+    if (!Array.isArray(DB.tenants)) { DB.tenants = []; }
+    var mudou = false;
+    (linhas || []).forEach(function (linha) {
+      if (!linha || !linha.tenant_id) { return; }
+      var novo = f21_montar(linha), atual = null;
+      for (var i = 0; i < DB.tenants.length; i++) {
+        if (DB.tenants[i] && DB.tenants[i].id === novo.id) { atual = DB.tenants[i]; break; }
+      }
+      if (!atual) { DB.tenants.push(novo); mudou = true; return; }
+      for (var k in novo) {
+        if (Object.prototype.hasOwnProperty.call(novo, k) && atual[k] !== novo[k]) {
+          atual[k] = novo[k]; mudou = true;
+        }
+      }
+    });
+    F21.empresas = DB.tenants.length;
+    return mudou;
+  }
+  function f21_carregar() {
+    var c = f21_conexao();
+    if (!c) { return Promise.resolve(false); }
+    return c.from("empresas").select("*").then(function (r) {
+      if (r.error) { F21.erro = r.error.message; return false; }
+      var mudou = f21_aplicar(r.data);
+      F21.carregou = true;
+      if (mudou) { try { save(); } catch (e) {} }
+      return mudou;
+    }).catch(function (e) { F21.erro = String(e && e.message); return false; });
+  }
+  f21_carregar().then(function (mudou) {
+    if (mudou) {
+      try { if (typeof montarMenu === "function") { montarMenu(); } } catch (e) {}
+      try { if (typeof View !== "undefined" && View.pg) { ir(View.pg, View.p); } } catch (e) {}
+    }
+    try {
+      document.documentElement.setAttribute("data-f21",
+        F21.erro ? ("erro:" + F21.erro) : ("empresas-" + F21.empresas));
+    } catch (e) {}
+  });
+  try {
+    if (typeof ir === "function") {
+      var irAntigo = ir, tentando = false;
+      ir = function () {
+        if (!tentando && F21.carregou && Array.isArray(DB.tenants) && !DB.tenants.length) {
+          tentando = true;
+          f21_carregar().then(function () { tentando = false; });
+        }
+        return irAntigo.apply(this, arguments);
+      };
+      window.ir = ir;
+    }
+  } catch (e) {}
+  try { window.F21 = F21; window.f21_carregar = f21_carregar; } catch (e) {}
+})();
+</script>
 </body>
 </html>
