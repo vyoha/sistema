@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-25-e";
+  var F22_VERSAO = "2026-08-25-f";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -14911,6 +14911,757 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     window.f26_faltando = f26_faltando;
     window.f26_respostas = f26_respostas;
     document.documentElement.setAttribute("data-f26", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 27 · UM FORMULARIO DE CLIENTE, E SO UM
+
+   O QUE A NANDA DISSE
+
+   "esse e o terceiro lugar onde ele aparece e precisa virar o
+    mesmo formulario"
+
+   ONDE O CADASTRO DE CLIENTE APARECE NO SISTEMA
+
+     1 · Analise de Credito, o formulario publico do link da loja
+         — 30 perguntas, e as que decidem se a loja fia
+     2 · "Cadastrar na hora", dentro do modal de venda
+         — igualado na fase 26
+     3 · Clientes > Novo cadastro (`modalCliente`)
+         — ainda com os doze campos antigos
+
+   Tres portas para o mesmo cadastro, cada uma perguntando uma
+   coisa diferente. Quem entra pela porta 3 vira um cliente sem
+   referencia, sem renda e sem endereco de parente — e o crediario
+   nao tem como avaliar depois.
+
+   Esta camada fecha a terceira porta na mesma forma das outras.
+
+   ---------------------------------------------------------------
+   O QUE MUDA
+
+   `modalCliente` — tanto em "Novo cliente" quanto em "Editar
+   cliente" — passa a mostrar as mesmas cinco secoes:
+
+     Quem e o cliente   nome, cpf, dois telefones, nascimento,
+                        e-mail, origem
+     Onde mora          CEP com busca, endereco, bairro, cidade,
+                        uf, dois pontos de referencia, se a casa
+                        e propria, ha quanto tempo mora ali
+     Trabalho e renda   funcao, empresa, endereco e bairro do
+                        trabalho, ponto de referencia do trabalho,
+                        renda mensal, quantas pessoas trabalham em
+                        casa, renda da casa somada
+     Referencias        endereco de um parente e tres contatos
+     Pagamento          melhor dia para pagar, observacoes
+
+   Editando um cliente que ja tem essas respostas, elas voltam
+   preenchidas. Editando um cliente antigo, que nunca respondeu,
+   os campos novos vem vazios — e o cadastro pode enfim ser
+   completado sem sair da tela.
+
+   ---------------------------------------------------------------
+   QUEM E OBRIGADO E QUEM NAO E
+
+   Vendedor: nao salva com campo faltando. E a mesma regra da
+   fase 26, e a razao dela — quem esta no balcao nao decide
+   excecao de credito.
+
+   Administrador: o sistema DIZ o que falta e pede confirmacao.
+   Clicou em Salvar de novo, grava assim mesmo. Ele pode ter um
+   cliente que so compra a vista, ou um cadastro antigo que ele
+   esta corrigindo aos poucos, e travar isso seria travar o
+   trabalho dele. Mas ele nao passa por engano: precisa ver o que
+   falta e insistir.
+
+   ---------------------------------------------------------------
+   ONDE AS RESPOSTAS FICAM
+
+   Os doze campos antigos ficaram com os mesmos `id` (`k-nome`,
+   `k-cpf`, ...), entao o `salvarCliente` continua funcionando
+   como sempre, sem saber que a tela cresceu.
+
+   As respostas novas entram em `dados.credito`, o MESMO lugar
+   onde a fase 26 grava — para o cadastro feito na venda e o
+   cadastro feito aqui serem a mesma coisa no banco, e nao dois
+   formatos parecidos. Vao por um envelope em volta do
+   `Dados.criar` e do `Dados.alterar`.
+
+   Na edicao o envelope preserva o que ja estava gravado: campo
+   que o formulario nao trouxe nao apaga a resposta antiga.
+
+   Nenhuma tela e reescrita.
+   =============================================================== */
+(function () {
+
+  var F27 = { form: 0, gravou: 0, avisou: false, editando: null };
+
+  function g(id) { return document.getElementById(id); }
+  function so(x) { return String(x == null ? "" : x); }
+  function dg(s) { return so(s).replace(/\D/g, ""); }
+  function vv(id) { var e = g(id); return e ? so(e.value).trim() : ""; }
+  function ehVendedor() {
+    try { return typeof isVend === "function" && isVend(); } catch (e) { return false; }
+  }
+  function esq(s) { return so(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+
+  var MORADIA = [["", "Escolha"], ["propria", "Própria"], ["alugada", "Alugada"],
+                 ["familiar", "De familiar"], ["cedida", "Cedida"]];
+  var TEMPO = [["", "Escolha"], ["menos de 1 ano", "Menos de 1 ano"], ["1 a 3 anos", "1 a 3 anos"],
+               ["3 a 10 anos", "3 a 10 anos"], ["mais de 10 anos", "Mais de 10 anos"]];
+  var QUANTOS = [["", "Escolha"], ["1", "1"], ["2", "2"], ["3", "3"], ["4 ou mais", "4 ou mais"]];
+  var DIAS = [["", "Escolha"], ["5", "5"], ["10", "10"], ["15", "15"], ["20", "20"], ["25", "25"], ["30", "30"]];
+  var ORIGENS = ["Loja física", "Indicação", "Instagram", "Google", "WhatsApp", "Cliente antigo"];
+
+  function opts(lista, atual) {
+    return lista.map(function (o) {
+      return '<option value="' + o[0] + '"' + (o[0] === so(atual) ? " selected" : "") + ">" + o[1] + "</option>";
+    }).join("");
+  }
+  function campo(id, rot, valor, extra, obrig) {
+    return '<div class="fld"><label>' + rot + (obrig ? ' <span class="rq">*</span>' : "") +
+      '</label><input id="' + id + '" value="' + esq(valor) + '" ' + (extra || "") + "></div>";
+  }
+  function selec(id, rot, lista, atual) {
+    return '<div class="fld"><label>' + rot + ' <span class="rq">*</span></label><select id="' + id + '">' +
+      opts(lista, atual) + "</select></div>";
+  }
+  function titulo(t) { return '<div class="lg-eyebrow" style="margin:18px 0 10px">' + t + "</div>"; }
+
+  /* =============================================================
+     o formulario
+     ============================================================= */
+  function f27_html(c) {
+    c = c || {};
+    var cr = c.credito || (c.dados && c.dados.credito) || {};
+    var ct = cr.contatos || [];
+    function k(i, campo2) { return (ct[i] && ct[i][campo2]) || ""; }
+    var cidadePadrao = "", ufPadrao = "";
+    try { cidadePadrao = so(org().cidade); ufPadrao = so(org().uf); } catch (e) {}
+
+    return "" +
+      '<div class="hp" style="margin:0 0 14px">Este é o mesmo cadastro da <b>Análise de crédito</b> e da venda. ' +
+      "Um cliente respondido por inteiro é um cliente que o crediário consegue avaliar.</div>" +
+
+      titulo("Quem é o cliente") +
+      '<div class="rw rw2">' +
+        campo("k-nome", "Nome completo", c.nome, "", 1) +
+        campo("k-cpf", "CPF", (c.cpf ? (typeof fcpf === "function" ? fcpf(c.cpf) : c.cpf) : ""), 'maxlength="14"', 1) +
+      "</div>" +
+      '<div class="rw rw3">' +
+        campo("k-tel", "Telefone 1", c.tel, "", 1) +
+        campo("k27-fone2", "Telefone 2", cr.telefone2, "", 1) +
+        campo("k-nasc", "Nascimento", c.nascimento, 'type="date"', 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("k-mail", "E-mail", c.email, 'type="email"') +
+        '<div class="fld"><label>Origem</label><select id="k-org">' +
+          ORIGENS.map(function (o) {
+            return "<option" + (so(c.origem) === o ? " selected" : "") + ">" + o + "</option>";
+          }).join("") + "</select></div>" +
+      "</div>" +
+
+      titulo("Onde mora") +
+      '<div class="rw rw3">' +
+        campo("k-cep", "CEP", c.cep, 'inputmode="numeric" maxlength="9" placeholder="00000-000"') +
+        '<div class="fld" style="align-self:end;padding-bottom:9px">' +
+          '<label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:500">' +
+          '<input type="checkbox" id="k27-sem-cep" style="width:auto;margin:0"> Não sei o CEP</label></div>' +
+        '<div class="fld"><label>&nbsp;</label><div class="sm mut" id="k-cep-msg">O endereço se preenche sozinho.</div></div>' +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("k-end", "Endereço", c.endereco, 'placeholder="Rua, número"', 1) +
+        campo("k-bairro", "Bairro", c.bairro, "", 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("k-cid", "Cidade", (c.cidade || cidadePadrao), "", 1) +
+        campo("k-uf", "UF", (c.uf || ufPadrao), 'maxlength="2"') +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("k27-ref1", "Ponto de referência 1", cr.referencia1, 'placeholder="Perto de..."', 1) +
+        campo("k27-ref2", "Ponto de referência 2", cr.referencia2, "", 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        selec("k27-moradia", "A casa é própria?", MORADIA, cr.moradia) +
+        selec("k27-tempo-casa", "Há quanto tempo mora aí?", TEMPO, cr.tempo_casa) +
+      "</div>" +
+
+      titulo("Trabalho e renda") +
+      '<div class="rw rw2">' +
+        campo("k-prof", "Em que trabalha", c.profissao, 'placeholder="Função"', 1) +
+        campo("k27-empresa", "Nome da empresa", cr.empresa, "", 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("k27-end-trab", "Endereço do trabalho", cr.endereco_trabalho, "", 1) +
+        campo("k27-bairro-trab", "Bairro do trabalho", cr.bairro_trabalho, "", 1) +
+      "</div>" +
+      campo("k27-ref-trab", "Ponto de referência do trabalho", cr.referencia_trabalho, "", 1) +
+      '<div class="rw rw3">' +
+        campo("k27-renda", "Renda mensal (R$)", cr.renda, 'inputmode="decimal" placeholder="0,00"', 1) +
+        selec("k27-quantos", "Quantas pessoas trabalham em casa", QUANTOS, cr.pessoas_trabalham) +
+        campo("k27-renda-casa", "Renda da casa somada (R$)", cr.renda_casa, 'inputmode="decimal" placeholder="0,00"', 1) +
+      "</div>" +
+
+      titulo("Referências") +
+      '<div class="hp" style="margin:0 0 12px">Três contatos de pessoas próximas e o endereço de um parente. ' +
+      "É o que mais pesa na análise.</div>" +
+      campo("k27-end-parente", "Endereço de um parente", cr.endereco_parente, 'placeholder="Rua, número, bairro, cidade"', 1) +
+      '<div class="rw rw2">' +
+        campo("k27-ref-n1", "Contato 1 — nome e parentesco", k(0, "nome"), 'placeholder="Ex.: Maria, irmã"', 1) +
+        campo("k27-ref-t1", "Telefone do contato 1", k(0, "tel"), "", 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("k27-ref-n2", "Contato 2 — nome e parentesco", k(1, "nome"), "", 1) +
+        campo("k27-ref-t2", "Telefone do contato 2", k(1, "tel"), "", 1) +
+      "</div>" +
+      '<div class="rw rw2">' +
+        campo("k27-ref-n3", "Contato 3 — nome e parentesco", k(2, "nome"), "", 1) +
+        campo("k27-ref-t3", "Telefone do contato 3", k(2, "tel"), "", 1) +
+      "</div>" +
+
+      titulo("Pagamento") +
+      '<div class="rw rw2">' +
+        selec("k27-dia", "Melhor dia para pagar", DIAS, cr.melhor_dia) +
+        '<div class="fld"><label>Observações</label><input id="k-obs" value="' + esq(c.obs) + '"></div>' +
+      "</div>" +
+      '<div id="k-err" class="note ng hidden"></div>';
+  }
+
+  /* ---------- CEP ---------- */
+  function f27_cep() {
+    var c = g("k-cep"), msg = g("k-cep-msg"), sem = g("k27-sem-cep");
+    if (!c) { return; }
+    if (sem) {
+      sem.onchange = function () {
+        c.disabled = !!sem.checked;
+        if (msg) { msg.textContent = sem.checked ? "Preencha o endereço na mão." : "O endereço se preenche sozinho."; }
+      };
+    }
+    c.oninput = function () {
+      var d = dg(c.value).substring(0, 8);
+      c.value = d.length > 5 ? d.substring(0, 5) + "-" + d.substring(5) : d;
+      if (d.length !== 8) { return; }
+      if (msg) { msg.textContent = "Procurando…"; }
+      fetch("https://viacep.com.br/ws/" + d + "/json/")
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (!j || j.erro) { if (msg) { msg.textContent = "CEP não encontrado."; } return; }
+          if (g("k-end") && j.logradouro) { g("k-end").value = j.logradouro; }
+          if (g("k-bairro") && j.bairro) { g("k-bairro").value = j.bairro; }
+          if (g("k-cid") && j.localidade) { g("k-cid").value = j.localidade; }
+          if (g("k-uf") && j.uf) { g("k-uf").value = j.uf; }
+          if (msg) { msg.textContent = "Confira e complete o número."; }
+        })
+        .catch(function () { if (msg) { msg.textContent = "Não consegui consultar — pode preencher na mão."; } });
+    };
+  }
+
+  /* ---------- o que falta ---------- */
+  var OBRIGATORIOS = [
+    ["k-nome", "nome completo"], ["k-cpf", "CPF"], ["k-tel", "telefone 1"],
+    ["k27-fone2", "telefone 2"], ["k-nasc", "data de nascimento"],
+    ["k-end", "endereço"], ["k-bairro", "bairro"], ["k-cid", "cidade"],
+    ["k27-ref1", "ponto de referência 1"], ["k27-ref2", "ponto de referência 2"],
+    ["k27-moradia", "se a casa é própria"], ["k27-tempo-casa", "há quanto tempo mora aí"],
+    ["k-prof", "em que trabalha"], ["k27-empresa", "nome da empresa"],
+    ["k27-end-trab", "endereço do trabalho"], ["k27-bairro-trab", "bairro do trabalho"],
+    ["k27-ref-trab", "ponto de referência do trabalho"],
+    ["k27-renda", "renda mensal"], ["k27-quantos", "quantas pessoas trabalham em casa"],
+    ["k27-renda-casa", "renda da casa somada"],
+    ["k27-end-parente", "endereço de um parente"],
+    ["k27-ref-n1", "contato 1"], ["k27-ref-t1", "telefone do contato 1"],
+    ["k27-ref-n2", "contato 2"], ["k27-ref-t2", "telefone do contato 2"],
+    ["k27-ref-n3", "contato 3"], ["k27-ref-t3", "telefone do contato 3"],
+    ["k27-dia", "melhor dia para pagar"]
+  ];
+
+  function f27_faltando() {
+    var falta = [];
+    OBRIGATORIOS.forEach(function (o) { if (!vv(o[0])) { falta.push(o[1]); } });
+    return falta;
+  }
+
+  function f27_respostas() {
+    return {
+      telefone2: vv("k27-fone2"),
+      cep: vv("k-cep"),
+      referencia1: vv("k27-ref1"), referencia2: vv("k27-ref2"),
+      moradia: vv("k27-moradia"), tempo_casa: vv("k27-tempo-casa"),
+      empresa: vv("k27-empresa"),
+      endereco_trabalho: vv("k27-end-trab"), bairro_trabalho: vv("k27-bairro-trab"),
+      referencia_trabalho: vv("k27-ref-trab"),
+      renda: vv("k27-renda"), pessoas_trabalham: vv("k27-quantos"), renda_casa: vv("k27-renda-casa"),
+      endereco_parente: vv("k27-end-parente"),
+      contatos: [
+        { nome: vv("k27-ref-n1"), tel: vv("k27-ref-t1") },
+        { nome: vv("k27-ref-n2"), tel: vv("k27-ref-t2") },
+        { nome: vv("k27-ref-n3"), tel: vv("k27-ref-t3") }
+      ],
+      melhor_dia: vv("k27-dia")
+    };
+  }
+
+  /* uma resposta em branco nao apaga a que ja estava gravada */
+  function f27_juntar(antigo, novo) {
+    var r = {}, i;
+    antigo = antigo || {};
+    for (i in antigo) { if (Object.prototype.hasOwnProperty.call(antigo, i)) { r[i] = antigo[i]; } }
+    for (i in novo) {
+      if (!Object.prototype.hasOwnProperty.call(novo, i)) { continue; }
+      if (i === "contatos") {
+        var vel = antigo.contatos || [], nov = novo.contatos || [], juntos = [];
+        for (var j = 0; j < 3; j++) {
+          var a = vel[j] || {}, b = nov[j] || {};
+          juntos.push({ nome: b.nome || a.nome || "", tel: b.tel || a.tel || "" });
+        }
+        r.contatos = juntos;
+        continue;
+      }
+      if (novo[i] !== "" && novo[i] != null) { r[i] = novo[i]; }
+    }
+    return r;
+  }
+
+  /* =============================================================
+     desenhar depois que o modal existe
+     ============================================================= */
+  function f27_montar(id) {
+    /* pode haver mais de um modal na tela — o primeiro acesso
+       empilha o "Defina a sua senha" por cima. O corpo certo e o
+       que CONTEM o campo de nome, nao o primeiro da pagina. */
+    var nome = g("k-nome");
+    if (!nome) { return; }
+    var corpo = null, p = nome;
+    for (var i = 0; i < 8 && p; i++) {
+      if (p.classList && p.classList.contains("md-b")) { corpo = p; break; }
+      p = p.parentElement;
+    }
+    if (!corpo) { return; }
+    if (corpo.querySelector("#k27-ref1")) { return; }
+    var c = null;
+    try { c = id ? find(DB.customers, id) : null; } catch (e) {}
+    corpo.innerHTML = f27_html(c || {});
+    f27_cep();
+    F27.editando = id || null;
+    F27.avisou = false;
+    F27.form++;
+  }
+
+  try {
+    if (typeof modalCliente === "function") {
+      var modalClienteAntigo = modalCliente;
+      modalCliente = function (id, depoisVenda) {
+        var r = modalClienteAntigo.apply(this, arguments);
+        try { f27_montar(id); } catch (e) {}
+        return r;
+      };
+      window.modalCliente = modalCliente;
+    }
+  } catch (e) {}
+
+  /* =============================================================
+     salvar: vendedor nao passa, administrador confirma
+     ============================================================= */
+  try {
+    if (typeof salvarCliente === "function") {
+      var salvarAntigo27 = salvarCliente;
+      salvarCliente = function (id, depoisVenda) {
+        try {
+          if (g("k27-ref1")) {
+            var falta = f27_faltando();
+            if (falta.length) {
+              var err = g("k-err");
+              var lista = falta.slice(0, 6).join(", ") + (falta.length > 6 ? " e outros" : "");
+              if (ehVendedor()) {
+                if (err) {
+                  err.innerHTML = "<span style='width:17px'>" +
+                    (typeof ICON !== "undefined" ? ICON.alert : "!") + "</span><div>Faltam " +
+                    falta.length + " campo(s): " + lista + ".</div>";
+                  err.classList.remove("hidden");
+                }
+                return;
+              }
+              if (!F27.avisou) {
+                F27.avisou = true;
+                if (err) {
+                  err.innerHTML = "<span style='width:17px'>" +
+                    (typeof ICON !== "undefined" ? ICON.alert : "!") + "</span><div>Faltam " +
+                    falta.length + " campo(s): " + lista + ".<br><b>Clique em Salvar de novo</b> " +
+                    "para gravar o cadastro assim mesmo.</div>";
+                  err.classList.remove("hidden");
+                }
+                return;
+              }
+            }
+          }
+        } catch (e) {}
+        return salvarAntigo27.apply(this, arguments);
+      };
+      window.salvarCliente = salvarCliente;
+    }
+  } catch (e) {}
+
+  /* =============================================================
+     as respostas viajam junto — criar e alterar
+     ============================================================= */
+  function f27_ativo() { return !!g("k27-ref1"); }
+
+  try {
+    if (typeof Dados !== "undefined" && typeof Dados.criar === "function") {
+      var criarAntigo27 = Dados.criar;
+      Dados.criar = function (tabela, registro) {
+        try {
+          if (tabela === "customers" && registro && registro.dados && f27_ativo()) {
+            registro.dados.credito = f27_juntar(registro.dados.credito, f27_respostas());
+            if (!registro.dados.tel2) { registro.dados.tel2 = vv("k27-fone2"); }
+            F27.gravou++;
+          }
+        } catch (e) {}
+        return criarAntigo27.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+
+  try {
+    if (typeof Dados !== "undefined" && typeof Dados.alterar === "function") {
+      var alterarAntigo27 = Dados.alterar;
+      Dados.alterar = function (tabela, id, campos, versao) {
+        try {
+          if (tabela === "customers" && campos && campos.dados && f27_ativo()) {
+            var atual = null;
+            try { atual = find(DB.customers, id); } catch (e) {}
+            var velho = (atual && (atual.credito || (atual.dados && atual.dados.credito))) || {};
+            campos.dados.credito = f27_juntar(velho, f27_respostas());
+            if (!campos.dados.tel2) { campos.dados.tel2 = vv("k27-fone2"); }
+            F27.gravou++;
+          }
+        } catch (e) {}
+        return alterarAntigo27.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+
+  try {
+    window.F27 = F27;
+    window.f27_faltando = f27_faltando;
+    window.f27_respostas = f27_respostas;
+    document.documentElement.setAttribute("data-f27", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 28 · O CPF DIZ QUEM JA E CLIENTE, E COMO
+   ESSE CLIENTE ESTA
+
+   O QUE A NANDA PEDIU
+
+   "quando o vendedor tentar criar um cliente e digitar o CPF,
+    deve reconhecer se o CPF ja estiver cadastrado e aparecer a
+    mensagem na tela que o cliente ja tem cadastro nesse cpf, dai
+    o vendedor pode consultar o status do cadastro do cliente se
+    tem contrato em aberto, apto ou nao"
+
+   O QUE JA EXISTIA, E O QUE FALTAVA
+
+   O aviso de CPF repetido ja existe no modal de venda
+   (`checarCpfVenda`), e ele ja procura na empresa inteira — nao
+   so na carteira do vendedor. Duas coisas faltavam:
+
+   1 · Ele diz o nome e oferece "Usar este cliente". Nao diz se
+       esse cliente pode comprar. Justamente o que decide a venda.
+
+   2 · Ele so existe no modal de venda. Na tela de Clientes o
+       vendedor digita o CPF, preenche trinta campos e so descobre
+       o problema quando manda salvar.
+
+   O QUE ESTA CAMADA FAZ
+
+   Nos DOIS formularios — o da venda e o de Clientes — assim que o
+   CPF fecha onze digitos, o sistema procura e responde na hora:
+
+     Este CPF ja tem cadastro: FULANO DE TAL
+     Situacao: Inapto — contrato em aberto
+     Contratos em aberto: 2 · deve R$ 1.800,00
+     Atraso: 12 dias na parcela mais velha
+     Ultima compra: 12/08/2026
+     [ Usar este cliente ]
+
+   A situacao vem da mesma regra que a empresa ja usa em todas as
+   telas (`aptidao`): bloqueado, parcela vencida ou contrato em
+   aberto derrubam o "Apto".
+
+   DE ONDE VEM O NUMERO — E POR QUE ISSO IMPORTA
+
+   A carteira do vendedor e filtrada: `clientes()` so devolve quem
+   ele mesmo cadastrou ou para quem ele mesmo vendeu. Se a busca
+   usasse essa lista, um cliente atendido por outro vendedor
+   apareceria como "novo" — e a loja fiaria duas vezes para a
+   mesma pessoa.
+
+   Por isso a busca aqui usa `Q("customers")`, e a situacao usa
+   `DB.sales` e `DB.parcels`, que sao da empresa inteira. E uma
+   decisao consciente: o vendedor passa a ver a situacao de
+   credito de clientes que nao sao da carteira dele. Sem isso, a
+   pergunta "esse cliente pode comprar?" nao tem resposta certa.
+
+   O CLIENTE QUE NAO ESTA NA LISTA DELE
+
+   "Usar este cliente" gravava o `customer_id` certo, mas o campo
+   de selecao ficava em branco quando o cliente era de outro
+   vendedor — ele nao esta entre as opcoes. Aqui a opcao e
+   acrescentada na hora, para a tela mostrar o que foi escolhido.
+
+   EDITANDO UM CLIENTE
+
+   Editar o cadastro de alguem nao pode acusar o CPF dele mesmo.
+   A camada guarda quem esta sendo editado e ignora esse caso.
+
+   Nenhuma tela e reescrita.
+   =============================================================== */
+(function () {
+
+  var F28 = { editando: null, achou: 0 };
+
+  function g(id) { return document.getElementById(id); }
+  function so(x) { return String(x == null ? "" : x); }
+  function dg(s) { return so(s).replace(/\D/g, ""); }
+  function vv(id) { var e = g(id); return e ? so(e.value) : ""; }
+  function esc28(s) {
+    try { if (typeof esc === "function") { return esc(so(s)); } } catch (e) {}
+    return so(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function din(n) {
+    try { if (typeof money === "function") { return money(n); } } catch (e) {}
+    return "R$ " + (Number(n) || 0).toFixed(2).replace(".", ",");
+  }
+  function dia(d) {
+    var s = so(d).substring(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) { return s; }
+    return s.substring(8, 10) + "/" + s.substring(5, 7) + "/" + s.substring(0, 4);
+  }
+  function nota28(html, tipo) {
+    try { if (typeof nota === "function") { return nota(html, tipo); } } catch (e) {}
+    return '<div class="note ' + (tipo || "inf") + '" style="margin:0 0 12px">' + html + "</div>";
+  }
+
+  /* =============================================================
+     quem e esse CPF, e como ele esta
+     ============================================================= */
+  function f28_procurar(cpf) {
+    if (dg(cpf).length !== 11) { return null; }
+    var alvo = dg(cpf), achado = null;
+    try {
+      Q("customers").forEach(function (c) {
+        if (!achado && dg(c.cpf) === alvo) { achado = c; }
+      });
+    } catch (e) { return null; }
+    return achado;
+  }
+
+  function f28_situacao(c) {
+    var s = { nome: c.nome, id: c.id, apto: null, txt: "", motivo: "",
+              abertos: 0, deve: 0, atraso: 0, ultima: null };
+    try { var a = aptidao(c.id); s.apto = a.apto; s.txt = a.txt; s.motivo = a.motivo; } catch (e) {}
+    try {
+      s.abertos = DB.sales.filter(function (v) {
+        return v.customer_id === c.id && v.status !== "cancelada" && statusVenda(v) !== "quitada";
+      }).length;
+    } catch (e) {}
+    try { var r = resumoCliente(c.id); s.deve = r.aberto; s.ultima = r.ultima; } catch (e) {}
+    try { s.atraso = atrasoMaximo(c.id); } catch (e) {}
+    return s;
+  }
+
+  function f28_html(s, comBotao) {
+    var tipo = (s.txt === "Bloqueado") ? "ng" : (s.apto ? "inf" : "wr");
+    var linhas =
+      "Este CPF já tem cadastro: <b>" + esc28(s.nome) + "</b>" +
+      '<div style="margin-top:7px;line-height:1.75">' +
+      "Situação: <b>" + esc28(s.txt || "—") + "</b>" + (s.motivo ? " — " + esc28(s.motivo) : "") + "<br>" +
+      "Contratos em aberto: <b>" + s.abertos + "</b>" +
+      (s.deve ? " · deve <b>" + din(s.deve) + "</b>" : " · nada em aberto") + "<br>" +
+      "Atraso: <b>" + (s.atraso ? s.atraso + (s.atraso === 1 ? " dia" : " dias") + " na parcela mais velha" : "sem atraso") + "</b>" +
+      (s.ultima ? "<br>Última compra: <b>" + dia(s.ultima) + "</b>" : "") +
+      "</div>";
+    if (comBotao) {
+      linhas += '<div style="margin-top:10px">' +
+        '<button type="button" class="btn btn-s" onclick="f28_usar(\'' + s.id + '\')">Usar este cliente</button></div>';
+    }
+    return nota28(linhas, tipo);
+  }
+
+  /* =============================================================
+     usar o cliente encontrado — inclusive quando ele nao esta
+     entre as opcoes da carteira deste vendedor
+     ============================================================= */
+  function f28_usar(id) {
+    try {
+      var sel = g("d-cli");
+      if (sel) {
+        var tem = false, i;
+        for (i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value === id) { tem = true; break; }
+        }
+        if (!tem) {
+          var c = null;
+          try { c = find(DB.customers, id); } catch (e) {}
+          var o = document.createElement("option");
+          o.value = id;
+          o.textContent = (c && c.nome ? c.nome : "Cliente") + (c && c.cpf ? " · " + c.cpf : "");
+          sel.appendChild(o);
+        }
+      }
+    } catch (e) {}
+    try {
+      if (typeof usarClienteExistente === "function") { usarClienteExistente(id); return; }
+    } catch (e) {}
+    try {
+      if (typeof modoCliente === "function") { modoCliente("existente"); }
+      if (typeof draft !== "undefined" && draft) { draft.customer_id = id; }
+      var s2 = g("d-cli"); if (s2) { s2.value = id; }
+      var box = g("nv-alerta"); if (box) { box.innerHTML = ""; }
+    } catch (e) {}
+  }
+
+  /* =============================================================
+     1 · o formulario da venda — enriquece o aviso que ja existe
+     ============================================================= */
+  function f28_venda() {
+    var box = g("nv-alerta");
+    if (!box) { return; }
+    var c = f28_procurar(vv("nv-cpf"));
+    if (!c) { return; }              /* deixa o aviso de rede da tela original */
+    box.innerHTML = f28_html(f28_situacao(c), true);
+    F28.achou++;
+  }
+
+  try {
+    if (typeof checarCpfVenda === "function") {
+      var checarAntigo28 = checarCpfVenda;
+      checarCpfVenda = function () {
+        var r;
+        try { r = checarAntigo28.apply(this, arguments); } catch (e) {}
+        try { f28_venda(); } catch (e) {}
+        return r;
+      };
+      window.checarCpfVenda = checarCpfVenda;
+    }
+  } catch (e) {}
+
+  /* o `onblur` original so dispara ao sair do campo; aqui o aviso
+     aparece assim que o decimo primeiro digito e digitado */
+  function f28_ligarVenda() {
+    var campo = g("nv-cpf");
+    if (!campo || campo.getAttribute("data-f28")) { return; }
+    campo.setAttribute("data-f28", "1");
+    campo.addEventListener("input", function () {
+      if (dg(campo.value).length === 11) {
+        try { checarCpfVenda(); } catch (e) {}
+      } else {
+        var b = g("nv-alerta"); if (b) { b.innerHTML = ""; }
+      }
+    });
+  }
+
+  /* =============================================================
+     2 · o formulario de Clientes — o aviso passa a existir
+     ============================================================= */
+  function f28_caixaClientes() {
+    var campo = g("k-cpf");
+    if (!campo) { return null; }
+    var caixa = g("k-alerta");
+    if (caixa) { return caixa; }
+    var fld = campo, i;
+    for (i = 0; i < 4 && fld; i++) {
+      if (fld.classList && fld.classList.contains("fld")) { break; }
+      fld = fld.parentElement;
+    }
+    var linha = (fld && fld.parentElement) ? fld.parentElement : (campo.parentElement || null);
+    if (!linha || !linha.parentElement) { return null; }
+    caixa = document.createElement("div");
+    caixa.id = "k-alerta";
+    linha.parentElement.insertBefore(caixa, linha.nextSibling);
+    return caixa;
+  }
+
+  function f28_clientes() {
+    var campo = g("k-cpf");
+    if (!campo) { return; }
+    var caixa = f28_caixaClientes();
+    if (!caixa) { return; }
+    var c = f28_procurar(campo.value);
+    if (!c || (F28.editando && c.id === F28.editando)) { caixa.innerHTML = ""; return; }
+    caixa.innerHTML = f28_html(f28_situacao(c), false);
+    F28.achou++;
+  }
+
+  function f28_ligarClientes() {
+    var campo = g("k-cpf");
+    if (!campo || campo.getAttribute("data-f28")) { return; }
+    campo.setAttribute("data-f28", "1");
+    function ver() {
+      if (dg(campo.value).length === 11) { f28_clientes(); }
+      else { var b = g("k-alerta"); if (b) { b.innerHTML = ""; } }
+    }
+    campo.addEventListener("input", ver);
+    campo.addEventListener("blur", ver);
+    ver();
+  }
+
+  /* =============================================================
+     ligar depois que cada modal aparece
+     ============================================================= */
+  try {
+    if (typeof modalCliente === "function") {
+      var modalClienteAntigo28 = modalCliente;
+      modalCliente = function (id) {
+        F28.editando = id || null;
+        var r = modalClienteAntigo28.apply(this, arguments);
+        try { setTimeout(f28_ligarClientes, 60); } catch (e) {}
+        return r;
+      };
+      window.modalCliente = modalCliente;
+    }
+  } catch (e) {}
+
+  try {
+    if (typeof modalVenda === "function") {
+      var modalVendaAntigo28 = modalVenda;
+      modalVenda = function () {
+        var r = modalVendaAntigo28.apply(this, arguments);
+        try { setTimeout(f28_ligarVenda, 60); } catch (e) {}
+        return r;
+      };
+      window.modalVenda = modalVenda;
+    }
+  } catch (e) {}
+
+  /* o bloco de cliente novo e redesenhado ao trocar de aba */
+  try {
+    if (typeof modoCliente === "function") {
+      var modoAntigo28 = modoCliente;
+      modoCliente = function (m) {
+        var r = modoAntigo28.apply(this, arguments);
+        try { setTimeout(f28_ligarVenda, 60); } catch (e) {}
+        return r;
+      };
+      window.modoCliente = modoCliente;
+    }
+  } catch (e) {}
+
+  try {
+    window.F28 = F28;
+    window.f28_usar = f28_usar;
+    window.f28_procurar = f28_procurar;
+    window.f28_situacao = f28_situacao;
+    document.documentElement.setAttribute("data-f28", "ativa");
   } catch (e) {}
 })();
 
