@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-25-f";
+  var F22_VERSAO = "2026-08-25-g";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -15662,6 +15662,242 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     window.f28_procurar = f28_procurar;
     window.f28_situacao = f28_situacao;
     document.documentElement.setAttribute("data-f28", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 29 · A CONSULTA DE CPF PASSA PELA RPC
+
+   POR QUE
+
+   A camada 28 lia a tabela `customers` inteira no navegador para
+   dizer se o CPF já existe e qual a situação de crédito. A
+   auditoria mostrou que isso só funcionava porque o banco
+   entregava a empresa toda ao vendedor (A1). Ao fechar essa
+   leitura ampla, a 28 pararia de encontrar clientes fora da
+   carteira do vendedor — justamente o que ela precisa achar.
+
+   Esta camada troca a fonte: em vez de ler a tabela, chama a RPC
+   controlada `consultar_cpf(cpf)`, que:
+     · procura só na empresa do próprio usuário (tenant);
+     · exige o CPF completo (não deixa varrer/enumerar);
+     · devolve só o necessário para a decisão — existe, nome,
+       situação, motivo, contratos em aberto, saldo, atraso,
+       última compra. Nada de endereço, telefone, id.
+
+   Assim o vendedor continua consultando qualquer CPF da empresa,
+   sem ter acesso à tabela de clientes — pré e pós aperto do A1.
+
+   COMO, SEM BRIGAR COM A 28
+
+   A 28 prendeu ouvintes de `input` no campo de CPF dentro do seu
+   IIFE — não dá para removê-los por referência. Então esta camada
+   CLONA o campo (o clone nasce sem ouvintes) e instala um único
+   caminho: o da RPC. Vale para os dois formulários — a venda
+   (`nv-cpf`) e o cadastro de Clientes (`k-cpf`).
+
+   O botão "Usar este cliente" só aparece quando o cliente também
+   está na carteira local (o vendedor já tem o id). Para cliente
+   de fora, mostra a situação sem o botão — ele não deve operar
+   sobre cliente de outro vendedor.
+
+   Nenhuma tela é reescrita.
+   =============================================================== */
+(function () {
+
+  var F29 = { consultas: 0, ligado: 0 };
+
+  function g(id) { return document.getElementById(id); }
+  function so(x) { return String(x == null ? "" : x); }
+  function dg(s) { return so(s).replace(/\D/g, ""); }
+  function esc29(s) {
+    try { if (typeof esc === "function") { return esc(so(s)); } } catch (e) {}
+    return so(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function din(n) {
+    try { if (typeof money === "function") { return money(n); } } catch (e) {}
+    return "R$ " + (Number(n) || 0).toFixed(2).replace(".", ",");
+  }
+  function dia(d) {
+    var s = so(d).substring(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) { return s; }
+    return s.substring(8, 10) + "/" + s.substring(5, 7) + "/" + s.substring(0, 4);
+  }
+  function nota29(html, tipo) {
+    try { if (typeof nota === "function") { return nota(html, tipo); } } catch (e) {}
+    return '<div class="note ' + (tipo || "inf") + '" style="margin:0 0 12px">' + html + "</div>";
+  }
+  function ehVendedor() {
+    try { return typeof isVend === "function" && isVend(); } catch (e) { return false; }
+  }
+
+  /* id local do cliente com este CPF, se estiver na carteira */
+  function idLocalPorCpf(cpf) {
+    try {
+      var alvo = dg(cpf), achado = null;
+      (DB.customers || []).forEach(function (c) {
+        if (!achado && dg(c.cpf) === alvo && !c.excluido) { achado = c.id; }
+      });
+      return achado;
+    } catch (e) { return null; }
+  }
+
+  /* chama a RPC pela conexão autenticada do app */
+  function consultar(cpf) {
+    try {
+      var cx = (typeof Sessao !== "undefined" && Sessao.conexao) ? Sessao.conexao() : null;
+      if (cx && cx.rpc) {
+        return cx.rpc("consultar_cpf", { p_cpf: cpf }).then(function (r) {
+          return (r && r.data) ? r.data : (r && r.error ? { ok: false, erro: "falha" } : null);
+        });
+      }
+    } catch (e) {}
+    /* sem conexão supabase: cai no fetch direto com o token da sessão */
+    try {
+      var url = (window.SUPA_URL || "") + "/rest/v1/rpc/consultar_cpf";
+      var chave = window.SUPA_KEY || window.SUPA_ANON || "";
+      var tok = "";
+      try { tok = (JSON.parse(localStorage.getItem("vyoha_sessao") || "{}") || {}).access_token || ""; } catch (e) {}
+      return fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: chave,
+          Authorization: "Bearer " + (tok || chave)
+        },
+        body: JSON.stringify({ p_cpf: cpf })
+      }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+
+  function pintar(box, dados, comUsar) {
+    if (!box) { return; }
+    if (!dados || dados.ok === false) {
+      /* CPF incompleto ou erro: não polui a tela */
+      box.innerHTML = (dados && dados.erro && dg((g("nv-cpf") || g("k-cpf") || {}).value).length === 11)
+        ? nota29(esc29(dados.erro), "wr") : "";
+      return;
+    }
+    if (!dados.existe) { box.innerHTML = ""; return; }
+
+    var tipo = (dados.situacao === "Bloqueado") ? "ng" : (dados.apto ? "inf" : "wr");
+    var html =
+      "Este CPF já tem cadastro: <b>" + esc29(dados.nome) + "</b>" +
+      '<div style="margin-top:7px;line-height:1.75">' +
+      "Situação: <b>" + esc29(dados.situacao || "—") + "</b>" +
+      (dados.motivo ? " — " + esc29(dados.motivo) : "") + "<br>" +
+      "Contratos em aberto: <b>" + (Number(dados.contratos_abertos) || 0) + "</b>" +
+      (Number(dados.deve) ? " · deve <b>" + din(dados.deve) + "</b>" : " · nada em aberto") + "<br>" +
+      "Atraso: <b>" + (Number(dados.atraso_dias) ? dados.atraso_dias + (dados.atraso_dias === 1 ? " dia" : " dias") + " na parcela mais velha" : "sem atraso") + "</b>" +
+      (dados.ultima_compra ? "<br>Última compra: <b>" + dia(dados.ultima_compra) + "</b>" : "") +
+      "</div>";
+
+    if (comUsar) {
+      var idl = idLocalPorCpf((g("nv-cpf") || {}).value);
+      if (idl) {
+        html += '<div style="margin-top:10px">' +
+          '<button type="button" class="btn btn-s" onclick="f28_usar(\'' + idl + '\')">Usar este cliente</button></div>';
+      } else {
+        html += '<div class="sm mut" style="margin-top:8px">Este cliente não está na sua carteira. ' +
+          "Para vender a ele, procure o administrador.</div>";
+      }
+    }
+    box.innerHTML = nota29(html, tipo);
+    F29.consultas++;
+  }
+
+  /* garante a caixinha de aviso no formulário de Clientes */
+  function caixaClientes() {
+    var campo = g("k-cpf");
+    if (!campo) { return null; }
+    var caixa = g("k-alerta");
+    if (caixa) { return caixa; }
+    var fld = campo, i;
+    for (i = 0; i < 4 && fld; i++) {
+      if (fld.classList && fld.classList.contains("fld")) { break; }
+      fld = fld.parentElement;
+    }
+    var linha = (fld && fld.parentElement) ? fld.parentElement : (campo.parentElement || null);
+    if (!linha || !linha.parentElement) { return null; }
+    caixa = document.createElement("div");
+    caixa.id = "k-alerta";
+    linha.parentElement.insertBefore(caixa, linha.nextSibling);
+    return caixa;
+  }
+
+  /* clona o campo (tira ouvintes antigos) e instala o da RPC */
+  function religar(inputId, boxFn) {
+    var el = g(inputId);
+    if (!el || el.getAttribute("data-f29")) { return; }
+    var novo = el.cloneNode(true);
+    novo.setAttribute("data-f29", "1");
+    el.parentNode.replaceChild(novo, el);
+
+    var comUsar = (inputId === "nv-cpf");
+    var timer = null;
+    function ver() {
+      var box = boxFn();
+      var cpf = novo.value;
+      if (dg(cpf).length !== 11) { if (box) { box.innerHTML = ""; } return; }
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        Promise.resolve(consultar(cpf)).then(function (d) { pintar(box, d, comUsar); });
+      }, 250);
+    }
+    novo.addEventListener("input", ver);
+    novo.addEventListener("blur", ver);
+    F29.ligado++;
+  }
+
+  /* ------------------------------------------------------------
+     religar depois que cada modal aparece
+     ------------------------------------------------------------ */
+  try {
+    if (typeof modalVenda === "function") {
+      var mvAntigo29 = modalVenda;
+      modalVenda = function () {
+        var r = mvAntigo29.apply(this, arguments);
+        try { setTimeout(function () { religar("nv-cpf", function () { return g("nv-alerta"); }); }, 90); } catch (e) {}
+        return r;
+      };
+      window.modalVenda = modalVenda;
+    }
+  } catch (e) {}
+
+  try {
+    if (typeof modoCliente === "function") {
+      var mcAntigo29 = modoCliente;
+      modoCliente = function (m) {
+        var r = mcAntigo29.apply(this, arguments);
+        try { setTimeout(function () {
+          var el = g("nv-cpf"); if (el) { el.removeAttribute("data-f29"); }
+          religar("nv-cpf", function () { return g("nv-alerta"); });
+        }, 90); } catch (e) {}
+        return r;
+      };
+      window.modoCliente = modoCliente;
+    }
+  } catch (e) {}
+
+  try {
+    if (typeof modalCliente === "function") {
+      var mkAntigo29 = modalCliente;
+      modalCliente = function () {
+        var r = mkAntigo29.apply(this, arguments);
+        try { setTimeout(function () { religar("k-cpf", caixaClientes); }, 120); } catch (e) {}
+        return r;
+      };
+      window.modalCliente = modalCliente;
+    }
+  } catch (e) {}
+
+  try {
+    window.F29 = F29;
+    window.f29_consultar = consultar;
+    document.documentElement.setAttribute("data-f29", "ativa");
   } catch (e) {}
 })();
 
