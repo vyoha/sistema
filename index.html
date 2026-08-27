@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-27-c";
+  var F22_VERSAO = "2026-08-27-d";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -16557,6 +16557,131 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     } catch (e) {}
 
     document.documentElement.setAttribute("data-f34", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+
+<!-- FASE 35 analisar credito no vender -->
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 35 · "ANALISAR CRÉDITO" NA TELA VENDER
+
+   CONTEXTO (o que já existe)
+
+   A tela "Vender" (pg_pdv) já mostra, acima do catálogo, a Rota de
+   visitas do vendedor — `cardsVisita()`: cada cliente aguardando
+   visita com endereço, "Ver no mapa" (Google Maps), "Registrar
+   visita" (Aprovado / Reprovado / Remarcar), WhatsApp e "Ver ficha".
+   O catálogo já mostra o estoque ("X disponíveis").
+
+   O que faltava era um PONTO DE PARTIDA claro pro vendedor iniciar a
+   análise de um cliente. A Nanda pediu: preencher na hora OU mandar
+   o link pelo WhatsApp.
+
+   O QUE ESTA CAMADA FAZ (só pro perfil vendedor)
+
+   Injeta na tela Vender, logo abaixo do título, um botão
+   "Analisar crédito de um cliente". Ele abre um modal com:
+
+     - "Preencher a ficha agora"  -> abre o formulário único
+       (`modalCliente()`, o mesmo com os campos de análise de
+       crédito das fases 26/27). Funciona offline, sem depender do
+       servidor legado.
+     - "Enviar link pro cliente (WhatsApp)" -> `modalLinkLoja()`,
+       SÓ quando o link da loja já existe (`LINK_LOJA.codigo`). Se
+       ainda não existe, explica que o administrador precisa gerá-lo
+       — esta camada NUNCA gera o link (isso toca o servidor de
+       produção).
+
+   Reaproveita funções que já existem (modal, modalCliente,
+   modalLinkLoja, nota). Não reescreve nenhuma tela: injeta depois
+   que o `ir()` desenha, e só quando é vendedor na tela Vender.
+   =============================================================== */
+(function () {
+  try {
+    if (document.getElementById("f35-css")) { return; }
+
+    var s = document.createElement("style");
+    s.id = "f35-css";
+    s.textContent = [
+      ".f35-wrap{margin:0 0 18px}",
+      ".f35-b{display:inline-flex;align-items:center;gap:9px}",
+      ".f35-b svg{flex:none}",
+      /* no celular o botão ocupa a largura toda; no desktop, o tamanho natural */
+      "@media(max-width:900px){.f35-b{width:100%;justify-content:center}}"
+    ].join("\n");
+    document.head.appendChild(s);
+
+    function ehVend() {
+      try { return typeof isVend === "function" && isVend(); } catch (e) { return false; }
+    }
+
+    window.f35_abrir = function () {
+      var temLink = false;
+      try { temLink = !!(typeof LINK_LOJA !== "undefined" && LINK_LOJA && LINK_LOJA.codigo); } catch (e) {}
+
+      var corpo =
+        '<p style="margin-bottom:16px;line-height:1.6;color:var(--ink-2)">' +
+        "Como você quer fazer a análise de crédito deste cliente?</p>" +
+        '<button class="btn btn-p btn-lg" style="width:100%;justify-content:center;margin-bottom:10px" ' +
+        'onclick="fecharModal();modalCliente()">Preencher a ficha agora</button>' +
+        (temLink
+          ? '<button class="btn btn-lg" style="width:100%;justify-content:center" ' +
+            'onclick="fecharModal();modalLinkLoja()">Enviar link pro cliente (WhatsApp)</button>'
+          : (typeof nota === "function"
+              ? nota("O link de análise para enviar no WhatsApp ainda não foi gerado para a sua " +
+                  "loja. Você pode <b>preencher a ficha agora</b>, ou pedir ao administrador para " +
+                  "gerar o link em <b>Análise de crédito</b>.", "inf")
+              : ""));
+
+      try {
+        modal("Analisar crédito de um cliente", corpo,
+          '<button class="btn" onclick="fecharModal()">Fechar</button>');
+      } catch (e) {}
+    };
+
+    function injeta() {
+      var pg = "";
+      try { pg = String((typeof View !== "undefined" && View && View.pg) || ""); } catch (e) {}
+      if (pg !== "pdv" || !ehVend()) { return; }
+
+      var page = document.getElementById("page") || document.querySelector(".page");
+      if (!page) { return; }
+      if (page.querySelector("#f35-wrap")) { return; }
+
+      var wrap = document.createElement("div");
+      wrap.id = "f35-wrap";
+      wrap.className = "f35-wrap";
+      wrap.innerHTML =
+        '<button type="button" class="btn btn-p f35-b" onclick="f35_abrir()">' +
+        '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M12 3.2 19.4 6v6c0 4.3-3 7.6-7.4 9-4.4-1.4-7.4-4.7-7.4-9V6Z"/>' +
+        '<path d="m9.2 12.2 2 2 3.6-3.8"/></svg>' +
+        "Analisar crédito de um cliente</button>";
+
+      var head = page.querySelector(".head");
+      if (head && head.nextSibling) { page.insertBefore(wrap, head.nextSibling); }
+      else if (head) { page.appendChild(wrap); }
+      else { page.insertBefore(wrap, page.firstChild); }
+    }
+
+    try {
+      if (typeof ir === "function") {
+        var ir35 = ir;
+        window.ir = function () {
+          var r = ir35.apply(this, arguments);
+          try { injeta(); } catch (e) {}
+          return r;
+        };
+      }
+    } catch (e) {}
+
+    try { setTimeout(injeta, 900); } catch (e) {}
+
+    document.documentElement.setAttribute("data-f35", "ativa");
   } catch (e) {}
 })();
 
