@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-25-h";
+  var F22_VERSAO = "2026-08-25-i";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -15991,6 +15991,54 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     window.F30 = F30;
     window.f30_recarregar = recarregar;
     document.documentElement.setAttribute("data-f30", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 31 · A TELA DE ACESSO CABE NO CELULAR
+
+   O QUE A NANDA VIU
+
+   No celular, na tela do token, o layout não se adaptava — o
+   formulário e o botão "Continuar" vazavam para fora da tela.
+
+   A CAUSA (medida, num viewport de 386px)
+
+   No mobile o `#login` usa `grid-template-columns:1fr`. Um track
+   `1fr` tem mínimo implícito de `min-content`: ele CRESCE até
+   caber o conteúdo mínimo do formulário. O `.lg-form` tem
+   padding lateral, então seu min-content ficou 385 + 52 = 437px.
+   Resultado: a coluna virou 437px numa tela de 386 → a form
+   (`width:100%`) herdou 437 e o botão terminou em 411, fora da
+   borda.
+
+   A CORREÇÃO
+
+   `grid-template-columns:minmax(0,1fr)` — o `minmax(0,1fr)` troca
+   o mínimo de `min-content` por `0`, então a coluna passa a valer
+   a largura disponível (386), a form cabe (386) e o botão fica
+   dentro. Medido depois do fix: coluna 386, form 386, botão
+   termina em 360, sem transbordo.
+
+   Só CSS, só no mobile (<=1000px), só na tela de acesso. Não
+   toca em mais nada.
+   =============================================================== */
+(function () {
+  try {
+    if (document.getElementById("f31-css")) { return; }
+    var s = document.createElement("style");
+    s.id = "f31-css";
+    s.textContent =
+      "@media(max-width:1000px){" +
+        "#login{grid-template-columns:minmax(0,1fr)!important}" +
+        ".lg-form{max-width:100%!important}" +
+        ".tk input{min-width:0}" +
+      "}";
+    document.head.appendChild(s);
+    document.documentElement.setAttribute("data-f31", "ativa");
   } catch (e) {}
 })();
 
