@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-27-b";
+  var F22_VERSAO = "2026-08-27-c";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -16362,6 +16362,201 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     }, 300);
 
     document.documentElement.setAttribute("data-f33", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+
+<!-- FASE 34 clientes funil filtro + nome empresa -->
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 34 · FILTRO EM FUNIL (CLIENTES) + NOME DA
+   EMPRESA QUE NÃO VAZA A BARRA LATERAL
+
+   O QUE A NANDA RELATOU
+
+   1 · Na tela de Clientes, os chips de status (Todos / Já compraram
+       / Sem compra / Em atraso / Bloqueados) vazam a tela no
+       celular — "Bloqueados" sai pra fora. Pedido: trocar por um
+       FUNIL ao lado da busca; dentro dele os status; padrão
+       "Todos"; e um atalho rápido pra "Sem compra".
+
+   2 · O nome da empresa ("TESTE VYOHA homologação") ultrapassa a
+       barra lateral. Causa: `.org-txt` (container do nome) não tem
+       `min-width:0`, então o `text-overflow:ellipsis` do `.org-name`
+       nunca corta — o texto empurra a largura.
+
+   O QUE ESTA CAMADA FAZ
+
+   1 · Nome da empresa: `.org-txt{min-width:0}` (e reforço de
+       ellipsis). O nome passa a cortar com "…" dentro da barra.
+       Vale no mobile e no desktop — é um conserto, não um layout
+       novo.
+
+   2 · Clientes (só no mobile, <=900px): esconde os chips `.seg` e,
+       ao lado da busca, injeta:
+         - um botão FUNIL "Filtro: <atual>" que abre a lista dos 5
+           status (Todos é o padrão);
+         - um atalho "Sem compra" de um toque.
+       Tudo grava no MESMO estado que a tela já usa (`UI.cFiltro`) e
+       chama `ir('clientes')` — nada de lógica de filtro nova. No
+       desktop os chips continuam como antes.
+
+   Nenhuma tela é reescrita: a camada mexe no que o `ir()` desenha,
+   e marca a tela atual em `html[data-tela]` pra escopar o CSS só a
+   Clientes (não mexe nos `.seg` de outras telas).
+   =============================================================== */
+(function () {
+  try {
+    if (document.getElementById("f34-css")) { return; }
+
+    var OPCOES = [
+      ["", "Todos"],
+      ["compraram", "Já compraram"],
+      ["sem_compra", "Sem compra"],
+      ["atraso", "Em atraso"],
+      ["bloqueados", "Bloqueados"]
+    ];
+
+    /* ---------- CSS ---------- */
+    var s = document.createElement("style");
+    s.id = "f34-css";
+    s.textContent = [
+      /* 1 · nome da empresa corta com "…" dentro da barra lateral */
+      ".org-txt{min-width:0}",
+      ".org-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+
+      /* 2 · o funil fica escondido por padrão (desktop mantém os chips) */
+      ".f34-filtro{display:none;align-items:center;gap:8px}",
+      ".f34-funil{display:inline-flex;align-items:center;gap:8px;height:40px;" +
+        "padding:0 14px;border:1px solid var(--line);border-radius:11px;background:#fff;" +
+        "font-size:13px;color:var(--ink-2);cursor:pointer;white-space:nowrap}",
+      ".f34-funil .ct{font-weight:640;color:var(--ink)}",
+      ".f34-funil svg{flex:none}",
+      ".f34-atalho{height:40px;padding:0 13px;border:1px solid var(--line);border-radius:11px;" +
+        "background:#fff;font-size:12.5px;color:var(--ink-2);cursor:pointer;white-space:nowrap}",
+      ".f34-atalho.on{background:var(--brand-soft);border-color:var(--brand-line);color:var(--brand);font-weight:640}",
+      ".f34-pop{position:absolute;z-index:90;margin-top:6px;background:#fff;border:1px solid var(--line);" +
+        "border-radius:12px;box-shadow:var(--sh-2);padding:6px;min-width:190px}",
+      ".f34-pop .op{padding:10px 12px;border-radius:9px;font-size:13.5px;color:var(--ink-2);cursor:pointer}",
+      ".f34-pop .op.on{background:var(--brand-soft);color:var(--brand);font-weight:640}",
+      ".f34-pop .op:hover{background:var(--line-2)}",
+
+      /* só na tela de Clientes e só no mobile: troca chips pelo funil */
+      "@media(max-width:900px){",
+        'html[data-tela="clientes"] .filters .seg{display:none}',
+        'html[data-tela="clientes"] .f34-filtro{display:inline-flex}',
+      "}"
+    ].join("\n");
+    document.head.appendChild(s);
+
+    /* fecha o popover ao tocar fora (registrado uma vez só) */
+    var popAberto = null;
+    document.addEventListener("click", function () {
+      if (popAberto) { try { popAberto.style.display = "none"; } catch (e) {} popAberto = null; }
+    });
+
+    function rotuloDe(v) {
+      for (var i = 0; i < OPCOES.length; i++) { if (OPCOES[i][0] === v) { return OPCOES[i][1]; } }
+      return OPCOES[0][1];
+    }
+
+    function montaFunil() {
+      var pg = "";
+      try { pg = String((typeof View !== "undefined" && View && View.pg) || ""); } catch (e) {}
+      if (pg !== "clientes") { return; }
+
+      var filtros = document.querySelector(".page .filters");
+      if (!filtros) { return; }
+      if (filtros.querySelector(".f34-filtro")) { return; }
+
+      var atual = "";
+      try { atual = (typeof UI !== "undefined" && UI.cFiltro) || ""; } catch (e) {}
+
+      var wrap = document.createElement("div");
+      wrap.className = "f34-filtro";
+
+      /* botão funil + popover */
+      var caixa = document.createElement("div");
+      caixa.style.position = "relative";
+
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "f34-funil";
+      b.innerHTML =
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M3 5h18l-7 8v6l-4 2v-8Z"/></svg>' +
+        '<span>Filtro:</span> <span class="ct">' + rotuloDe(atual) + "</span>";
+
+      var pop = document.createElement("div");
+      pop.className = "f34-pop";
+      pop.style.display = "none";
+      pop.innerHTML = OPCOES.map(function (o) {
+        return '<div class="op' + (o[0] === atual ? " on" : "") + '" data-v="' + o[0] + '">' + o[1] + "</div>";
+      }).join("");
+      pop.addEventListener("click", function (e) {
+        var op = e.target.closest(".op");
+        if (!op) { return; }
+        try { UI.cFiltro = op.getAttribute("data-v"); ir("clientes"); } catch (er) {}
+      });
+
+      b.onclick = function (e) {
+        e.stopPropagation();
+        var abrir = pop.style.display === "none";
+        if (popAberto && popAberto !== pop) { popAberto.style.display = "none"; }
+        pop.style.display = abrir ? "block" : "none";
+        popAberto = abrir ? pop : null;
+      };
+
+      caixa.appendChild(b);
+      caixa.appendChild(pop);
+
+      /* atalho "Sem compra" */
+      var at = document.createElement("button");
+      at.type = "button";
+      at.className = "f34-atalho" + (atual === "sem_compra" ? " on" : "");
+      at.textContent = "Sem compra";
+      at.onclick = function () {
+        try { UI.cFiltro = (atual === "sem_compra" ? "" : "sem_compra"); ir("clientes"); } catch (er) {}
+      };
+
+      wrap.appendChild(caixa);
+      wrap.appendChild(at);
+
+      var srch = filtros.querySelector(".srch");
+      if (srch && srch.nextSibling) { filtros.insertBefore(wrap, srch.nextSibling); }
+      else { filtros.appendChild(wrap); }
+    }
+
+    /* marca a tela atual (escopa o CSS) e monta o funil, a cada ir() */
+    function pos(pg) {
+      try { document.documentElement.setAttribute("data-tela", String(pg || "")); } catch (e) {}
+      try { montaFunil(); } catch (e) {}
+    }
+
+    try {
+      if (typeof ir === "function") {
+        var ir34 = ir;
+        window.ir = function (pg) {
+          var r = ir34.apply(this, arguments);
+          try { pos(pg); } catch (e) {}
+          return r;
+        };
+      }
+    } catch (e) {}
+
+    /* estado inicial (a tela já pode estar em Clientes) */
+    try {
+      setTimeout(function () {
+        var pg = "";
+        try { pg = String((typeof View !== "undefined" && View && View.pg) || ""); } catch (e) {}
+        pos(pg);
+      }, 800);
+    } catch (e) {}
+
+    document.documentElement.setAttribute("data-f34", "ativa");
   } catch (e) {}
 })();
 
