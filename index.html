@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-27-a";
+  var F22_VERSAO = "2026-08-27-b";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -16179,6 +16179,189 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     }
 
     document.documentElement.setAttribute("data-f32", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+
+<!-- FASE 33 mobile modais cabecalho perfil -->
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 33 · MODAIS SEM SAMBA + CABEÇALHO COM RESPIRO
+
+   O QUE A NANDA RELATOU (no celular)
+
+   A · "As páginas que abrem sobrepostas (nova venda, novo cadastro,
+        redefinir senha) ainda sambam na tela."
+        -> São os modais (.md-bg). A fase 32 tratou #login/#app/.shell,
+           mas o modal tem rolagem própria e não foi tocado.
+        Causas no iOS:
+          1. `.md-bg` é `position:fixed;inset:0` -> a altura usa o
+             viewport de layout (inclui a faixa atrás da barra do
+             Safari), então o overlay fica mais alto que a área
+             visível e balança.
+          2. O fundo (html/body) continua rolando atrás do modal
+             (scroll chaining) -> repique duplo.
+          3. `.md-b{max-height:calc(100vh - 250px)}` usa 100vh, que
+             estoura pelo mesmo motivo.
+
+   B · "O cabeçalho no celular está sem respiro: 'buscar cliente' fica
+        cortado, o perfil fica muito espremido. Podia ter só o ☰ e a
+        informação do perfil dentro do menu."
+        -> No topo, além do ☰ e do título, ficam a busca global
+           (.gsearch, flex:1) e o cartão de perfil (.me), disputando
+           uma barra de 70px num celular.
+
+   O QUE ESTA CAMADA FAZ (global, só no mobile via @media)
+
+   A · Modais:
+       - trava o fundo enquanto há modal aberto: html:has(.md-bg)
+         { overflow:hidden } (Safari iOS 16.4+; navegador sem :has
+         ignora e cai nos itens abaixo).
+       - overscroll-behavior:contain nos roláveis (.md-bg e .md-b):
+         mata o "chaining"/rubber-band nas bordas.
+       - no mobile, o overlay usa altura real: .md-bg{height:100dvh}
+         e o corpo troca o 100vh por 100dvh.
+
+   B · Cabeçalho (<=900px):
+       - some a busca global e o cartão de perfil do topo -> sobra
+         só ☰ + título, com espaço de sobra.
+       - injeta um bloco de perfil no rodapé do menu lateral (nome,
+         cargo e as ações: Meu perfil, Configurações [admin],
+         Falar com o suporte, Sair). Reaproveita as funções que já
+         existem (modalPerfil/ir/abrirSuporte/sair), nada novo de
+         lógica. No desktop o bloco fica escondido (o perfil segue
+         no topo, como antes).
+
+   Não reescreve nenhuma tela. Desktop intacto.
+   =============================================================== */
+(function () {
+  try {
+    if (document.getElementById("f33-css")) { return; }
+
+    function e2(s) {
+      return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      });
+    }
+
+    /* ---------- CSS ---------- */
+    var s = document.createElement("style");
+    s.id = "f33-css";
+    s.textContent = [
+      /* A · rolagem interna dos modais não "chaina" para o fundo */
+      ".md-bg{overscroll-behavior:contain}",
+      ".md-b{overscroll-behavior:contain}",
+
+      /* B · o bloco de perfil no menu fica escondido no desktop */
+      "#f33-perfil{display:none}",
+      "#f33-perfil .f33-u{display:flex;align-items:center;gap:11px;padding:8px 8px 12px}",
+      "#f33-perfil .f33-av{width:36px;height:36px;border-radius:11px;flex:none;" +
+        "display:flex;align-items:center;justify-content:center;font-size:13px;" +
+        "font-weight:650;color:#fff;background:linear-gradient(150deg,var(--brand-2),var(--brand-3))}",
+      "#f33-perfil .f33-nome{font-size:13.5px;font-weight:620;line-height:1.25}",
+      "#f33-perfil .f33-cargo{font-size:11.5px;color:var(--ink-3);margin-top:1px}",
+      "#f33-perfil .f33-i{display:flex;align-items:center;gap:11px;padding:11px 8px;" +
+        "border-radius:10px;font-size:13.5px;color:var(--ink-2);cursor:pointer}",
+      "#f33-perfil .f33-i:active,#f33-perfil .f33-i:hover{background:var(--line-2)}",
+      "#f33-perfil .f33-i.dg{color:var(--danger)}",
+
+      "@media(max-width:1040px){",
+        /* A · trava o fundo e usa a altura real da tela no modal */
+        "html:has(.md-bg){overflow:hidden}",
+        ".md-bg{height:100dvh}",
+        ".md-b{max-height:calc(100dvh - 250px)}",
+      "}",
+
+      "@media(max-width:900px){",
+        /* B · tira a busca e o perfil apertados do topo */
+        ".bar .gsearch{display:none}",
+        ".bar .me{display:none}",
+        /* mostra o perfil dentro do menu lateral */
+        "#f33-perfil{display:block;border-top:1px solid var(--line-2);" +
+          "padding:14px 14px 6px}",
+      "}"
+    ].join("\n");
+    document.head.appendChild(s);
+
+    /* ---------- B · monta o perfil no menu ---------- */
+    function montaPerfilNav() {
+      var nav = document.getElementById("nav");
+      if (!nav) { return false; }
+
+      var u = null;
+      try { u = (typeof me === "function") ? me() : null; } catch (e) {}
+
+      var bloco = document.getElementById("f33-perfil");
+      if (!bloco) {
+        bloco = document.createElement("div");
+        bloco.id = "f33-perfil";
+        var seal = nav.querySelector(".nav-seal");
+        if (seal) { nav.insertBefore(bloco, seal); } else { nav.appendChild(bloco); }
+      }
+
+      if (!u) { bloco.innerHTML = ""; return true; }
+
+      var nome = u.nome || "";
+      var cargo = u.cargo || "";
+      try {
+        if (!cargo && typeof PERFIS !== "undefined" && PERFIS[u.perfil]) {
+          cargo = PERFIS[u.perfil].nome;
+        }
+      } catch (e) {}
+      var ini = "";
+      try { if (typeof ini2 === "function") { ini = ini2(nome); } } catch (e) {}
+      var admin = false;
+      try { admin = (typeof isAdmin === "function") && isAdmin(); } catch (e) {}
+
+      var itens =
+        '<div class="f33-i" onclick="try{modalPerfil()}catch(e){}">Meu perfil</div>' +
+        (admin ? '<div class="f33-i" onclick="try{ir(\'config\')}catch(e){}">Configurações</div>' : "") +
+        '<div class="f33-i" onclick="try{abrirSuporte()}catch(e){}">Falar com o suporte</div>' +
+        '<div class="f33-i dg" onclick="try{sair()}catch(e){}">Sair</div>';
+
+      bloco.innerHTML =
+        '<div class="f33-u"><span class="f33-av">' + e2(ini) + "</span>" +
+        '<div><div class="f33-nome">' + e2(nome) + "</div>" +
+        '<div class="f33-cargo">' + e2(cargo) + "</div></div></div>" +
+        itens;
+      return true;
+    }
+
+    /* atualiza junto com o app: no login (montarUsuario) e ao navegar (ir) */
+    try {
+      if (typeof montarUsuario === "function") {
+        var mu = montarUsuario;
+        window.montarUsuario = function () {
+          var r = mu.apply(this, arguments);
+          try { montaPerfilNav(); } catch (e) {}
+          return r;
+        };
+      }
+    } catch (e) {}
+    try {
+      if (typeof ir === "function") {
+        var ir33 = ir;
+        window.ir = function () {
+          var r = ir33.apply(this, arguments);
+          try { montaPerfilNav(); } catch (e) {}
+          return r;
+        };
+      }
+    } catch (e) {}
+
+    /* primeira montagem: tenta até a sessão existir */
+    var n = 0;
+    var t = setInterval(function () {
+      n++;
+      var u = null;
+      try { u = (typeof me === "function") ? me() : null; } catch (e) {}
+      montaPerfilNav();
+      if (u || n > 40) { clearInterval(t); }
+    }, 300);
+
+    document.documentElement.setAttribute("data-f33", "ativa");
   } catch (e) {}
 })();
 
