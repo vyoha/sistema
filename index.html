@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-25-i";
+  var F22_VERSAO = "2026-08-27-a";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -16039,6 +16039,146 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
       "}";
     document.head.appendChild(s);
     document.documentElement.setAttribute("data-f31", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+
+<!-- FASE 32 mobile cabecalho icone menu rolagem 100dvh -->
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 32 · CABEÇALHO, ÍCONE, MENU E ROLAGEM (MOBILE)
+
+   O QUE A NANDA VIU (no celular, login do vendedor)
+
+   1 · "Nome sobreposto" — no topo, o subtítulo do cabeçalho
+       ("<empresa> · Catálogo e fechamento de venda") quebrava em
+       4 linhas e transbordava a barra de 70px, batendo no título
+       "Vender" da página. Causa: o bloco do título (h1 + .sub) não
+       tem `min-width:0`, então o `.gsearch` (flex:1) o espremia e
+       o subtítulo enrolava para baixo.
+
+   2 · "Botão sem cor" — a caixinha branca vazia no canto superior
+       direito dos modais (ex.: "Defina a sua senha"). É o botão de
+       fechar (.x). O ícone X é um <svg viewBox> SEM width/height, e
+       não existe CSS dimensionando o svg dentro de .x. No iOS o svg
+       sem tamanho intrínseco colapsa para 0px → o botão aparece
+       como um quadrado vazio. (O burger não some porque o svg dele
+       tem width/height inline.)
+
+   3 · "Menu lateral não recolhe" — o burger abre a `.nav` (classe
+       .open), mas só o `ir()` a fecha. Tocar fora do menu não
+       fechava, porque não há backdrop nem clique-fora.
+
+   4 · "A rolagem fica sambando, como se o espaço da página fosse
+       maior que a tela" — repique vertical constante. Causa: três
+       contêineres usam `min-height:100vh` (#login, #app, .shell).
+       No iOS o `100vh` conta a faixa atrás da barra de endereço do
+       Safari, então a página fica SEMPRE um pouco mais alta que a
+       área visível → sobra rolagem → o "samba". (Não era overflow
+       horizontal: `html,body{overflow-x:hidden}` já existe.)
+
+   O QUE ESTA CAMADA FAZ (global, só no mobile via @media)
+
+   1 · O bloco do título recebe `min-width:0` e o h1/.sub passam a
+       ser 1 linha com reticências; em telas de celular (<=640) o
+       subtítulo longo sai de vez. A barra volta a caber em 70px.
+       NÃO mexo em overflow da .bar (senão cortaria os dropdowns de
+       busca e de perfil).
+   2 · Dou tamanho ao svg dentro de .x (modais e drawers). O X
+       reaparece em qualquer navegador, inclusive iOS.
+   3 · Um backdrop escurece a tela quando o menu abre; tocar nele
+       (ou em qualquer área fora do menu) fecha. Só no mobile.
+   4 · Troco `100vh` por `100dvh` (altura dinâmica = área realmente
+       visível) em #login/#app/.shell no mobile. Navegador antigo
+       sem `dvh` ignora a regra e mantém o `100vh` de antes.
+
+   Não reescreve nenhuma tela. Desktop intacto (tudo atrás de
+   @media(max-width:1040px) e o backdrop só aparece com o menu
+   aberto no mobile).
+   =============================================================== */
+(function () {
+  try {
+    if (document.getElementById("f32-css")) { return; }
+
+    /* ---------- 1+2 · CSS ---------- */
+    var s = document.createElement("style");
+    s.id = "f32-css";
+    s.textContent = [
+      /* --- 2 · o X dos modais/drawers ganha tamanho (conserta o iOS) --- */
+      ".md-h .x svg,.dw-h .x svg{width:17px;height:17px;stroke:currentColor}",
+
+      /* --- 3 · backdrop do menu (visível só no mobile com menu aberto) --- */
+      "#f32-bd{position:fixed;inset:0;background:rgba(6,27,39,.38);" +
+        "z-index:55;opacity:0;pointer-events:none;transition:opacity .2s}",
+
+      "@media(max-width:1040px){",
+        /* 1 · o título não empurra mais a barra; cada linha vira 1 linha */
+        ".bar>div:not(.bar-r){min-width:0}",
+        ".bar h1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+        ".bar .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+        /* 3 · backdrop ativo quando o menu está aberto */
+        "html.f32-menu-aberto #f32-bd{opacity:1;pointer-events:auto}",
+        /* 4 · altura real da tela (mata o samba do 100vh no iOS) */
+        "#login{min-height:100dvh}",
+        "#app{min-height:100dvh}",
+        ".shell{min-height:100dvh}",
+      "}",
+
+      /* em telas de celular, o subtítulo longo sai de vez (a empresa
+         já aparece no menu lateral) */
+      "@media(max-width:640px){.bar .sub{display:none}}"
+    ].join("\n");
+    document.head.appendChild(s);
+
+    /* ---------- 3 · o menu fecha ao tocar fora ---------- */
+    function ligarMenu() {
+      var nav = document.getElementById("nav");
+      if (!nav) { return false; }
+
+      /* backdrop */
+      if (!document.getElementById("f32-bd")) {
+        var bd = document.createElement("div");
+        bd.id = "f32-bd";
+        bd.addEventListener("click", function () { nav.classList.remove("open"); });
+        document.body.appendChild(bd);
+      }
+
+      /* espelha a classe .open do nav em <html> para o backdrop reagir */
+      try {
+        var obs = new MutationObserver(function () {
+          try {
+            document.documentElement.classList.toggle(
+              "f32-menu-aberto", nav.classList.contains("open"));
+          } catch (e) {}
+        });
+        obs.observe(nav, { attributes: true, attributeFilter: ["class"] });
+      } catch (e) {}
+
+      /* fallback: clique fora do menu (e fora do burger) fecha */
+      document.addEventListener("click", function (e) {
+        try {
+          if (!nav.classList.contains("open")) { return; }
+          if (nav.contains(e.target)) { return; }
+          if (e.target.closest && e.target.closest(".burger")) { return; }
+          nav.classList.remove("open");
+        } catch (er) {}
+      }, true);
+
+      return true;
+    }
+
+    if (!ligarMenu()) {
+      /* nav ainda não montou (tela de login): tenta de novo */
+      var tentativas = 0;
+      var t = setInterval(function () {
+        tentativas++;
+        if (ligarMenu() || tentativas > 40) { clearInterval(t); }
+      }, 250);
+    }
+
+    document.documentElement.setAttribute("data-f32", "ativa");
   } catch (e) {}
 })();
 
