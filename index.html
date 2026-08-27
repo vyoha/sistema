@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-25-g";
+  var F22_VERSAO = "2026-08-25-h";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -15898,6 +15898,99 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     window.F29 = F29;
     window.f29_consultar = consultar;
     document.documentElement.setAttribute("data-f29", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 30 · O APP LÊ A EMPRESA SEM O TOKEN
+
+   POR QUE
+
+   A camada 21 carrega `DB.tenants` de `public.empresas` com
+   `select("*")`. A auditoria (A3) mostrou que a coluna `token`
+   (segredo de vínculo da empresa) vinha junto e ficava legível
+   por qualquer usuário logado, inclusive o vendedor.
+
+   Para esconder o token no banco (revoke de coluna), o app precisa
+   PARAR de pedir `*` — senão o `select *` passa a dar
+   "permission denied for column token".
+
+   O QUE ESTA CAMADA FAZ
+
+   Recarrega `DB.tenants` pedindo só as colunas não-secretas
+   (sem token / token_anterior / token_graca_ate). Roda no
+   arranque e quando a aba volta ao foco, e sobrepõe o que a
+   camada 21 tiver carregado. Assim, mesmo depois do revoke do
+   token, o nome da empresa (org()) continua aparecendo.
+
+   PUBLICAR ESTA CAMADA ANTES de rodar o SQL do A3.
+
+   Nenhuma tela é reescrita.
+   =============================================================== */
+(function () {
+
+  var F30 = { recargas: 0, erro: null };
+  var COLS = "tenant_id,nome,matriz_id,ativo,atualizado_em,email_admin,dados";
+
+  function conx() {
+    try { return (typeof Sessao !== "undefined" && Sessao.conexao) ? Sessao.conexao() : null; }
+    catch (e) { return null; }
+  }
+
+  function normaliza(linha) {
+    /* mesma forma que a camada 21 usa: espalha `dados` no topo */
+    var o = {};
+    try {
+      var d = linha.dados || {};
+      for (var k in d) { if (Object.prototype.hasOwnProperty.call(d, k)) { o[k] = d[k]; } }
+    } catch (e) {}
+    o.tenant_id = linha.tenant_id;
+    o.id = linha.tenant_id;
+    if (linha.nome != null) { o.nome = linha.nome; }
+    o.matriz_id = linha.matriz_id;
+    o.ativo = linha.ativo;
+    o.email_admin = linha.email_admin;
+    o.atualizado_em = linha.atualizado_em;
+    return o;
+  }
+
+  function recarregar() {
+    var c = conx();
+    if (!c || !c.from) { return; }
+    try {
+      c.from("empresas").select(COLS).then(function (r) {
+        try {
+          if (r && r.error) { F30.erro = r.error.message || "erro"; return; }
+          var linhas = (r && r.data) || [];
+          if (!linhas.length) { return; }
+          var novo = linhas.map(normaliza);
+          if (typeof DB !== "undefined") { DB.tenants = novo; }
+          F30.recargas++;
+          F30.erro = null;
+          try { document.documentElement.setAttribute("data-f30", "empresas-" + novo.length); } catch (e) {}
+        } catch (e) {}
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
+  /* arranque: depois que a sessão e a camada 21 já rodaram */
+  try { setTimeout(recarregar, 1500); } catch (e) {}
+  try { setTimeout(recarregar, 4000); } catch (e) {}
+
+  /* quando a aba volta ao foco */
+  try {
+    window.addEventListener("focus", function () {
+      if (!F30._ultima || (new Date() - F30._ultima) > 30000) { F30._ultima = new Date(); recarregar(); }
+    });
+  } catch (e) {}
+
+  try {
+    window.F30 = F30;
+    window.f30_recarregar = recarregar;
+    document.documentElement.setAttribute("data-f30", "ativa");
   } catch (e) {}
 })();
 
