@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-27-g";
+  var F22_VERSAO = "2026-08-27-h";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -16971,6 +16971,132 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     ].join("\n");
     document.head.appendChild(s);
     document.documentElement.setAttribute("data-f38", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+
+<!-- FASE 39 salvar regras ids corretos -->
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 39 · "SALVAR REGRAS" PARA DE ZERAR A CONFIG
+
+   O BUG (🔴 bloqueante, confirmado no código)
+
+   A tela de Configurações (aba Sistema) renderiza os campos com os
+   ids `c-juros`, `c-multa`, `c-com`, `c-min` (regras) e `c-pl`,
+   `c-meta` (pró-labore e meta) — vyoha-system.html:6134-6152.
+
+   Mas o `window.salvarRegras` ativo (o da ponte da Fase 3,
+   :10542) lê `cf-juros`, `cf-multa`, `cf-com`, `cf-estmin`,
+   `cf-sigla` — ids de uma versão ANTIGA da tela, que NÃO existem
+   mais. `nv()` de elemento inexistente devolve 0. Resultado: cada
+   clique em "Salvar regras" grava no servidor da empresa
+   juros=0, multa=0, comissão=0, estoque_min=3 e apaga a sigla —
+   e mostra "Regras salvas". Pró-labore e meta nem eram lidos.
+
+   Ou seja: o administrador não conseguia configurar o crediário, e
+   cada tentativa zerava as regras da empresa inteira. É o "carnê
+   errado" que o próprio código temia.
+
+   A CORREÇÃO
+
+   Sobrepõe `window.salvarRegras` (esta camada roda por último, então
+   vence a da ponte). O novo:
+     - lê os ids que a tela REALMENTE mostra (`c-*`);
+     - inclui meta e pró-labore (que a ponte tinha perdido);
+     - preserva TODO o resto da configuração (Object.assign a partir
+       da config atual) — não apaga sigla, frete, link etc.;
+     - grava pelo MESMO caminho de servidor da ponte
+       (Dados.criar / Dados.alterar em `config_empresa`), com o
+       mesmo controle de versão (conflito otimista).
+
+   Nada de back novo, nada de tela reescrita: só o id certo e os dois
+   campos que faltavam. Se a config já tinha sido zerada por cliques
+   anteriores, basta o admin digitar os valores certos e salvar uma
+   vez — agora grava de verdade.
+   =============================================================== */
+(function () {
+  try {
+    if (typeof Dados === "undefined" || typeof cfg !== "function") {
+      /* a ponte ainda não montou; tenta de novo daqui a pouco */
+      var n = 0;
+      var t = setInterval(function () {
+        n++;
+        if ((typeof Dados !== "undefined" && typeof cfg === "function") || n > 40) {
+          clearInterval(t);
+          if (typeof Dados !== "undefined" && typeof cfg === "function") { instalar(); }
+        }
+      }, 250);
+      return;
+    }
+    instalar();
+
+    function instalar() {
+      if (window.__f39) { return; }
+      window.__f39 = true;
+
+      window.salvarRegras = function () {
+        try {
+          var atual = (typeof cfg === "function" && cfg()) || {};
+
+          /* lê só os campos presentes na tela (ids corretos c-*) */
+          var patch = {};
+          if (el("c-juros")) {
+            patch.juros_mes = String(nv("c-juros"));
+            patch.multa = String(nv("c-multa"));
+            patch.comissao_pct = String(nv("c-com"));
+            patch.estoque_min = String(nv("c-min") || 3);
+          }
+          if (el("c-meta") || el("c-pl")) {
+            patch.meta_mes = String(nv("c-meta"));
+            patch.pro_labore_mensal = String(nv("c-pl"));
+          }
+
+          if (!Object.keys(patch).length) {
+            try { toast("Não encontrei os campos de regras nesta tela.", "err"); } catch (e) {}
+            return;
+          }
+
+          /* preserva todo o resto da config; muda só o que está na tela */
+          var novoDados = Object.assign({}, atual, patch);
+          var resumo = Object.keys(patch).map(function (k) { return k + "=" + patch[k]; }).join(" · ");
+
+          if (!atual.id) {
+            return Dados.criar("config_empresa", {
+              id: "cfg-" + Sessao.empresa(),
+              dados: novoDados
+            }).then(function (r) {
+              if (r && r.erro) { return toast(r.erro, "err"); }
+              try { logar("Configuração da empresa definida", resumo); } catch (e) {}
+              toast("Configuração definida. Ela já vale para todos os computadores.", "ok");
+              ir(View.pg, View.p);
+            }).catch(function () {
+              toast("Não consegui falar com o servidor. Nada foi salvo.", "err");
+            });
+          }
+
+          return Dados.alterar("config_empresa", atual.id, { dados: novoDados }, atual.versao)
+            .then(function (r) {
+              if (r && r.conflito) {
+                return toast("Outra pessoa alterou as regras enquanto você editava. " +
+                             "Recarregue e refaça a alteração.", "err");
+              }
+              if (r && r.erro) { return toast(r.erro, "err"); }
+              try { logar("Regras do negócio alteradas", resumo); } catch (e) {}
+              toast("Regras salvas. Elas já valem para todos os computadores.", "ok");
+              ir(View.pg, View.p);
+            }).catch(function () {
+              toast("Não consegui falar com o servidor. As regras não foram alteradas.", "err");
+            });
+        } catch (e) {
+          try { toast("Não consegui salvar as regras.", "err"); } catch (er) {}
+        }
+      };
+
+      document.documentElement.setAttribute("data-f39", "ativa");
+    }
   } catch (e) {}
 })();
 
