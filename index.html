@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-27-f";
+  var F22_VERSAO = "2026-08-27-g";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -16913,6 +16913,64 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 
     sincronizar();
     document.documentElement.setAttribute("data-f37", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+
+<!-- FASE 38 modal fullscreen scroll -->
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 38 · O MODAL FULLSCREEN DO VENDEDOR PARA DE
+   SE MEXER (só o corpo rola)
+
+   O QUE A NANDA VIU
+
+   "Preencher ficha agora → o modal de novo cliente ainda está se
+    movendo." (o MODAL, não o fundo — a fase 37 já travou o fundo)
+
+   A CAUSA (bug clássico de flexbox)
+
+   No celular do vendedor o modal é fullscreen (fase 25):
+     .md-bg > div { min-height:100%; display:flex; flex-direction:column }
+     .md-b        { flex:1; overflow-y:auto }   ← o corpo que deveria rolar
+
+   Só que um item flex tem `min-height:auto` por padrão: ele NÃO
+   encolhe abaixo da altura do próprio conteúdo. Com um formulário
+   longo (novo cliente tem dezenas de campos), o `.md-b` cresce em
+   vez de rolar, o card fica mais alto que a tela, e aí o
+   `.md-bg` (que é `overflow:auto`) rola o card inteiro — cabeçalho,
+   corpo e rodapé juntos. É o "modal se mexendo".
+
+   A CORREÇÃO
+
+   - fixa a altura do card na altura real da tela (100dvh, com
+     fallback 100vh);
+   - dá `min-height:0` ao `.md-b` para ele voltar a rolar por dentro;
+   - `overflow:hidden` no `.md-bg` e no card, para nada além do
+     corpo rolar.
+
+   Resultado: cabeçalho e rodapé (o "Salvar") ficam parados, só a
+   lista de campos rola. Só no mobile do vendedor (<=900px). Desktop
+   e admin intactos.
+   =============================================================== */
+(function () {
+  try {
+    if (document.getElementById("f38-css")) { return; }
+    var s = document.createElement("style");
+    s.id = "f38-css";
+    s.textContent = [
+      "@media(max-width:900px){",
+        /* o card ocupa exatamente a tela e não rola ele mesmo */
+        'html[data-f25="vendedor"] .md-bg{overflow:hidden}',
+        'html[data-f25="vendedor"] .md-bg>div{min-height:0;height:100vh;height:100dvh;max-height:100vh;max-height:100dvh;overflow:hidden}',
+        /* o corpo volta a rolar por dentro (conserta o flex min-height:auto) */
+        'html[data-f25="vendedor"] .md-b{min-height:0}',
+      "}"
+    ].join("\n");
+    document.head.appendChild(s);
+    document.documentElement.setAttribute("data-f38", "ativa");
   } catch (e) {}
 })();
 
