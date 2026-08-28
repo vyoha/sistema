@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-27-e";
+  var F22_VERSAO = "2026-08-27-f";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -16813,6 +16813,106 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     try { setTimeout(injeta, 950); } catch (e) {}
 
     document.documentElement.setAttribute("data-f36", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+
+<!-- FASE 37 trava fundo modal -->
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 37 · TRAVAR O FUNDO QUANDO O MODAL ABRE
+
+   O QUE A NANDA VIU
+
+   "99,9% ok — mas a ficha de novo cliente, ao clicar em 'Analisar
+    crédito', ainda samba."
+
+   POR QUE AINDA SAMBAVA
+
+   A fase 33 travava o fundo com `html:has(.md-bg){overflow:hidden}`.
+   O seletor `:has()` só existe no Safari iOS 16.4+. Num iPhone com
+   versão um pouco anterior, essa regra é ignorada → o fundo (a
+   página atrás do modal) continua rolando junto → o "samba".
+
+   Além disso, no iOS `overflow:hidden` no body NÃO basta pra
+   segurar a rolagem por toque — o jeito que funciona de verdade é
+   fixar o body enquanto o modal está aberto e devolver a posição
+   ao fechar.
+
+   O QUE ESTA CAMADA FAZ (só no mobile)
+
+   Observa o `#md-root`: quando existe um `.md-bg` (modal aberto),
+   trava o fundo com o padrão à prova de iOS:
+     body { position:fixed; top:-scrollY; width:100% }
+   e, ao fechar (nenhum `.md-bg`), solta e volta pra onde a pessoa
+   estava. O modal (que é `position:fixed`) não é afetado — só o
+   corpo atrás dele. Assim o único que rola é o conteúdo do modal.
+
+   Não depende de `:has()`, funciona em qualquer navegador, e no
+   desktop não faz nada (a trava só vale <=1040px).
+   =============================================================== */
+(function () {
+  try {
+    if (window.__f37ativa) { return; }
+    window.__f37ativa = true;
+
+    var scrollY = 0, locked = false;
+
+    function mobile() {
+      try { return window.innerWidth <= 1040; } catch (e) { return false; }
+    }
+    function temModal() {
+      try { return !!document.querySelector(".md-bg"); } catch (e) { return false; }
+    }
+
+    function travar() {
+      if (locked || !mobile()) { return; }
+      try {
+        scrollY = window.scrollY || window.pageYOffset || 0;
+        var b = document.body;
+        b.style.position = "fixed";
+        b.style.top = (-scrollY) + "px";
+        b.style.left = "0";
+        b.style.right = "0";
+        b.style.width = "100%";
+        document.documentElement.classList.add("f37-travado");
+        locked = true;
+      } catch (e) {}
+    }
+
+    function soltar() {
+      if (!locked) { return; }
+      try {
+        var b = document.body;
+        b.style.position = "";
+        b.style.top = "";
+        b.style.left = "";
+        b.style.right = "";
+        b.style.width = "";
+        document.documentElement.classList.remove("f37-travado");
+        locked = false;
+        window.scrollTo(0, scrollY);
+      } catch (e) {}
+    }
+
+    function sincronizar() {
+      try { if (temModal()) { travar(); } else { soltar(); } } catch (e) {}
+    }
+
+    /* o app anexa os modais em #md-root; observa entrada/saída deles */
+    try {
+      var root = document.getElementById("md-root") || document.body;
+      new MutationObserver(sincronizar).observe(root, { childList: true, subtree: true });
+    } catch (e) {}
+
+    /* reforços: abrir/fechar modal vem de clique; e um backstop periódico */
+    try { document.addEventListener("click", function () { setTimeout(sincronizar, 60); }, true); } catch (e) {}
+    try { setInterval(sincronizar, 1500); } catch (e) {}
+
+    sincronizar();
+    document.documentElement.setAttribute("data-f37", "ativa");
   } catch (e) {}
 })();
 
