@@ -13797,7 +13797,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-27-d";
+  var F22_VERSAO = "2026-08-27-e";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -16682,6 +16682,137 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     try { setTimeout(injeta, 900); } catch (e) {}
 
     document.documentElement.setAttribute("data-f35", "ativa");
+  } catch (e) {}
+})();
+
+</script>
+
+
+<!-- FASE 36 rota do dia -->
+<script>
+/* ===============================================================
+   VYOHA SYSTEM · FASE 36 · TRAÇAR A ROTA DO DIA (versão prática)
+
+   O QUE A NANDA PEDIU
+
+   "Uma função que mapeia os CEPs/endereços dos clientes pra indicar
+    a melhor rota do dia do vendedor — montar a rota à mão demora
+    muito."
+
+   VERSÃO PRÁTICA (esta camada)
+
+   Um botão "Traçar rota do dia" no topo do bloco "Visitas para
+   fazer" (que já existe na tela Vender). Ao tocar:
+     - junta os endereços de todas as visitas pendentes do vendedor
+       (`visitasDoVendedor`);
+     - pré-ordena por CEP (e, na falta, por bairro) como heurística
+       de proximidade;
+     - abre o Google Maps já com todos os pontos como paradas
+       (origem = onde o vendedor está agora). O Maps calcula o
+       trajeto e o vendedor pode arrastar pra reordenar.
+
+   Resolve o "demora muito": de vários endereços digitados à mão
+   para um toque. A otimização matemática fina (menor distância
+   total via geocodificação) fica pra uma evolução futura.
+
+   Reaproveita `visitasDoVendedor` e `toast`. Não reescreve tela:
+   injeta o botão depois que o `ir()` desenha.
+   =============================================================== */
+(function () {
+  try {
+    if (document.getElementById("f36-css")) { return; }
+
+    var s = document.createElement("style");
+    s.id = "f36-css";
+    s.textContent = [
+      ".f36-rota{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}",
+      ".f36-rota svg{flex:none}",
+      "@media(max-width:900px){.f36-rota{width:100%;justify-content:center;margin-top:10px}}"
+    ].join("\n");
+    document.head.appendChild(s);
+
+    function visitas() {
+      try {
+        if (typeof visitasDoVendedor === "function" && typeof Sess !== "undefined" && Sess) {
+          return visitasDoVendedor(Sess.user_id) || [];
+        }
+      } catch (e) {}
+      return [];
+    }
+
+    window.f36_rota = function () {
+      var v = visitas();
+      var pts = [];
+      v.forEach(function (a) {
+        var f = a.formulario || {};
+        var addr = [f.endereco, f.bairro, f.cidade].filter(Boolean).join(", ");
+        if (addr) { pts.push({ addr: addr, cep: (f.cep || ""), bairro: (f.bairro || "") }); }
+      });
+      if (!pts.length) {
+        try { toast("Nenhum endereço de visita para traçar a rota.", "er"); } catch (e) {}
+        return;
+      }
+      /* pré-ordena por CEP (proximidade aproximada); sem CEP, por bairro */
+      pts.sort(function (a, b) {
+        var ka = a.cep || a.bairro, kb = b.cep || b.bairro;
+        return String(ka).localeCompare(String(kb));
+      });
+      /* Google Maps aceita ~9 paradas; corta o excedente com aviso */
+      if (pts.length > 9) {
+        try { toast("A rota abre com as 9 primeiras paradas (limite do mapa).", "wr"); } catch (e) {}
+        pts = pts.slice(0, 9);
+      }
+      var enc = function (x) { return encodeURIComponent(x); };
+      var dest = pts[pts.length - 1].addr;
+      var way = pts.slice(0, -1).map(function (p) { return enc(p.addr); }).join("|");
+      var url = "https://www.google.com/maps/dir/?api=1&destination=" + enc(dest) +
+        (way ? "&waypoints=" + way : "") + "&travelmode=driving";
+      try { window.open(url, "_blank", "noopener"); } catch (e) {}
+    };
+
+    function injeta() {
+      /* acha o bloco "Visitas para fazer" (cardsVisita) e põe o botão no cabeçalho */
+      var page = document.getElementById("page") || document.querySelector(".page");
+      if (!page) { return; }
+      if (!visitas().length) { return; }
+
+      var alvo = null;
+      var boxes = page.querySelectorAll(".box .box-h");
+      for (var i = 0; i < boxes.length; i++) {
+        var h3 = boxes[i].querySelector("h3");
+        if (h3 && /Visitas para fazer/i.test(h3.textContent || "")) { alvo = boxes[i]; break; }
+      }
+      if (!alvo) { return; }
+      if (alvo.querySelector(".f36-rota")) { return; }
+
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn btn-p btn-s f36-rota";
+      b.style.marginLeft = "auto";
+      b.innerHTML =
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+        '<circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="5" r="2.2"/>' +
+        '<path d="M8 19h7a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h7"/></svg>' +
+        "Traçar rota do dia";
+      b.onclick = function () { try { f36_rota(); } catch (e) {} };
+      alvo.appendChild(b);
+    }
+
+    try {
+      if (typeof ir === "function") {
+        var ir36 = ir;
+        window.ir = function () {
+          var r = ir36.apply(this, arguments);
+          try { injeta(); } catch (e) {}
+          return r;
+        };
+      }
+    } catch (e) {}
+
+    try { setTimeout(injeta, 950); } catch (e) {}
+
+    document.documentElement.setAttribute("data-f36", "ativa");
   } catch (e) {}
 })();
 
