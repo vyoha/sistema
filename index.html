@@ -3872,8 +3872,9 @@ function verCliente(id, aba) {
   var abas = [["cadastro", "Cadastro"], ["compras", "Compras"]];
   if (isAdmin() && (r.aberto || acordosDoCliente(c.id).length)) abas.push(["cobranca", "Cobrança"]);
   var acoes = '<button class="btn btn-p" onclick="modalVenda(\'' + c.id + '\')">' + ICON.plus + "Registrar venda</button>" +
-    '<button class="btn" onclick="modalCliente(\'' + c.id + '\')">' + ICON.edit + "Editar cadastro</button>" +
-    (isAdmin() && resumoCliente(c.id).aberto ? '<button class="btn btn-g" style="margin-left:auto" onclick="modalNegociar(\'' + c.id + '\')">Negociar dívida</button>' : "") +
+  '<button class="btn" onclick="modalCliente(\'' + c.id + '\')">' + ICON.edit + "Editar cadastro</button>" +
+  (isAdmin() ? '<button class="btn btn-d" onclick="removerCliente(\'' + c.id + '\')">' + ICON.trash + "Excluir cliente</button>" : "") +
+  (isAdmin() && resumoCliente(c.id).aberto ? '<button class="btn btn-g" style="margin-left:auto" onclick="modalNegociar(\'' + c.id + '\')">Negociar dívida</button>' : "") +
     (!isAdmin() ? "" : bloqueado(c.id) ? '<button class="btn" onclick="desbloquear(\'' + c.id + '\')">Liberar crédito</button>'
       : (emCobranca(c.id) ? '<button class="btn btn-d" onclick="modalBloquear(\'' + c.id + '\')">Bloquear crédito</button>' : ""));
   drawer(esc(c.nome), (dig(c.cpf) ? fcpf(c.cpf) + " · " : "") + "cadastrado em " + fdate(c.criado),
