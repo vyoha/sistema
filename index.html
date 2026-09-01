@@ -3872,9 +3872,8 @@ function verCliente(id, aba) {
   var abas = [["cadastro", "Cadastro"], ["compras", "Compras"]];
   if (isAdmin() && (r.aberto || acordosDoCliente(c.id).length)) abas.push(["cobranca", "Cobrança"]);
   var acoes = '<button class="btn btn-p" onclick="modalVenda(\'' + c.id + '\')">' + ICON.plus + "Registrar venda</button>" +
-  '<button class="btn" onclick="modalCliente(\'' + c.id + '\')">' + ICON.edit + "Editar cadastro</button>" +
-  (isAdmin() ? '<button class="btn btn-d" onclick="removerCliente(\'' + c.id + '\')">' + ICON.trash + "Excluir cliente</button>" : "") +
-  (isAdmin() && resumoCliente(c.id).aberto ? '<button class="btn btn-g" style="margin-left:auto" onclick="modalNegociar(\'' + c.id + '\')">Negociar dívida</button>' : "") +
+    '<button class="btn" onclick="modalCliente(\'' + c.id + '\')">' + ICON.edit + "Editar cadastro</button>" +
+    (isAdmin() && resumoCliente(c.id).aberto ? '<button class="btn btn-g" style="margin-left:auto" onclick="modalNegociar(\'' + c.id + '\')">Negociar dívida</button>' : "") +
     (!isAdmin() ? "" : bloqueado(c.id) ? '<button class="btn" onclick="desbloquear(\'' + c.id + '\')">Liberar crédito</button>'
       : (emCobranca(c.id) ? '<button class="btn btn-d" onclick="modalBloquear(\'' + c.id + '\')">Bloquear crédito</button>' : ""));
   drawer(esc(c.nome), (dig(c.cpf) ? fcpf(c.cpf) + " · " : "") + "cadastrado em " + fdate(c.criado),
@@ -3973,39 +3972,6 @@ function corpoCliente(c, aba) {
     : vazio("Nenhuma cobrança registrada", "Registre cada contato para acompanhar a negociação com este cliente.",
       '<button class="btn btn-p" onclick="modalCobranca(\'' + c.id + '\')">Registrar cobrança</button>', "suporte")));
   return h3;
-}
-  function removerCliente(id) {
-  var c = find(DB.customers, id);
-  if (!c || c.tenant_id !== T() || !isAdmin()) return;
-
-  var r = resumoCliente(c.id);
-
-  if (r.vendas.length || r.parcelas.length || acordosDoCliente(c.id).length) {
-    return confirmar(
-      "Não é possível excluir este cliente",
-      "Este cliente possui histórico de vendas, parcelas ou acordos. Para preservar o histórico financeiro, o cadastro não pode ser apagado.",
-      function () {},
-      "Entendi"
-    );
-  }
-
-  confirmar(
-    "Excluir " + esc(c.nome) + "?",
-    "O cadastro será removido e enviado para a lixeira. Esta ação não apaga o histórico geral do sistema.",
-    function () {
-      Dados.apagar("customers", id).then(function (r) {
-        if (r && r.erro) return toast(r.erro, "err");
-
-        logar("Cliente excluído", c.nome);
-        fecharModal();
-        fecharDrawer();
-        toast("Cliente excluído.", "ok");
-        ir("clientes");
-      });
-    },
-    "Excluir",
-    true
-  );
 }
 function modalCliente(id, depoisVenda) {
   var c = id ? find(DB.customers, id) : null;
@@ -9989,63 +9955,8 @@ function painelCrediario() {
     }
   });
 
-  /* ═════════════════════════════════════════════════════════
-     O CHIP DE SINCRONIZAÇÃO · dizendo a verdade da vez
-
-     Ele lia um estado que não existe mais e escrevia "Só neste
-     computador · sincronização desligada". Estava certo por
-     acidente e errado no motivo: a sincronização não foi
-     desligada, ela foi removida — e no lugar dela o servidor
-     virou a fonte.
-
-     Mas apagar o chip seria pior. Durante a migração, uma parte
-     dos dados já vive no servidor e outra ainda não, e quem
-     está trabalhando tem o direito de saber qual é qual.
-
-     Então ele passa a contar o estado real da migração. Some
-     sozinho quando não sobrar nada local. */
-  window.syncPrecisaAparecer = function () { return true; };
-
-  /* as coleções que ainda moram neste computador.
-     Cada etapa da Fase 3 tira uma daqui. */
-  var AINDA_LOCAIS = ["customers", "products", "moves", "sales", "parcels", "cash",
-                      "metas", "cobrancas", "acordos", "analises", "restricoes",
-                      "config", "tenants", "logs"];
-
-  window.textoSync = function () {
-    if (!Sessao.ligada()) return ["Fora do ar", "sem sessão"];
-    var faltam = AINDA_LOCAIS.filter(function (c) {
-      return Array.isArray(DB[c]) && DB[c].length > 0;
-    });
-    if (!faltam.length) {
-      return ["Tudo no servidor", "nenhum dado depende deste computador"];
-    }
-    return ["Migração em andamento",
-            "acesso e equipe já vêm do servidor · " + faltam.length +
-            " coleção(ões) ainda neste computador"];
-  };
-
-  window.modalSync = function () {
-    var t = textoSync();
-    var faltam = AINDA_LOCAIS.filter(function (c) {
-      return Array.isArray(DB[c]) && DB[c].length > 0;
-    });
-    modal("Onde os dados estão",
-      nota("<b>" + esc(t[0]) + "</b> — " + esc(t[1]), faltam.length ? "wr" : "") +
-      ln("Você", (Sessao.quem() && Sessao.quem().nome) || "—") +
-      ln("Empresa", Sessao.empresa() || "—") +
-      ln("Perfil", Sessao.perfil() || "—") +
-      '<div class="sm mut" style="margin:14px 0 6px"><b>Já no servidor</b></div>' +
-      '<div class="sm">Acesso, sessão, empresa, perfil e equipe. Entram em qualquer ' +
-      'computador, e mudanças valem na hora.</div>' +
-      (faltam.length
-        ? '<div class="sm mut" style="margin:14px 0 6px"><b>Ainda neste computador</b></div>' +
-          '<div class="sm">' + esc(faltam.join(", ")) + '</div>' +
-          nota("Estas coleções ainda não foram migradas. Elas funcionam normalmente, mas " +
-               "<b>não aparecem em outro computador</b> até a etapa delas.", "wr")
-        : ""),
-      '<button class="btn btn-p" onclick="fecharModal()">Entendi</button>');
-  };
+  /* O chip de sincronização usa apenas o estado real do sistema.
+     O antigo indicador de "Migração em andamento" foi removido. */
 
   /* ─────────────────────────────────────────────────────────
      5. ARRANQUE
