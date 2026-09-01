@@ -3974,6 +3974,39 @@ function corpoCliente(c, aba) {
       '<button class="btn btn-p" onclick="modalCobranca(\'' + c.id + '\')">Registrar cobrança</button>', "suporte")));
   return h3;
 }
+  function removerCliente(id) {
+  var c = find(DB.customers, id);
+  if (!c || c.tenant_id !== T() || !isAdmin()) return;
+
+  var r = resumoCliente(c.id);
+
+  if (r.vendas.length || r.parcelas.length || acordosDoCliente(c.id).length) {
+    return confirmar(
+      "Não é possível excluir este cliente",
+      "Este cliente possui histórico de vendas, parcelas ou acordos. Para preservar o histórico financeiro, o cadastro não pode ser apagado.",
+      function () {},
+      "Entendi"
+    );
+  }
+
+  confirmar(
+    "Excluir " + esc(c.nome) + "?",
+    "O cadastro será removido e enviado para a lixeira. Esta ação não apaga o histórico geral do sistema.",
+    function () {
+      Dados.apagar("customers", id).then(function (r) {
+        if (r && r.erro) return toast(r.erro, "err");
+
+        logar("Cliente excluído", c.nome);
+        fecharModal();
+        fecharDrawer();
+        toast("Cliente excluído.", "ok");
+        ir("clientes");
+      });
+    },
+    "Excluir",
+    true
+  );
+}
 function modalCliente(id, depoisVenda) {
   var c = id ? find(DB.customers, id) : null;
   var corpo = '<div class="rw rw2"><div class="fld"><label>Nome completo <span class="rq">*</span></label><input id="k-nome" value="' + esc(c ? c.nome : "") + '"></div>' +
