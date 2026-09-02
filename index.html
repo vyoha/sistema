@@ -598,7 +598,7 @@ body.tour-on{overflow:hidden}
         <div class="sub" id="bar-s"></div>
       </div>
       <div class="bar-r">
-        <button class="sync mut" id="sync-chip" onclick="modalSync()" title="Sincronização"><span class="sync-p"></span>Só neste computador</button>
+        <button class="sync mut" id="sync-chip" onclick="modalSync()" title="Sincronização"><span class="sync-p"></span>Sincronização</button>
         <div class="gsearch">
           <span class="i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg></span>
           <input id="gq" placeholder="Buscar clientes, vendas ou produtos" autocomplete="off"
@@ -2847,9 +2847,11 @@ function iniciarApp() {
   aplicarMarca(); montarMenu(); montarUsuario(); montarSuporte(); avisoSuporteVyoha();
   ir(telaGuardada() || (isVend() ? "pdv" : "dashboard"), telaGuardadaP());
   pulso();
-  contarFila(); pintarSync();
-  if (nuvemSessao()) religarNuvem(function () {});
-  lacoSync();
+  /* A sincronização real é Supabase + TempoReal. Não existe fila local
+     nem segundo sincronizador rodando em paralelo. */
+  try { TempoReal.vigiarAutorizacao(); } catch (e) {}
+  try { TempoReal.ligarAtencaoDaJanela(); } catch (e) {}
+  try { pintarSync(); } catch (e) {}
   tourDeBoasVindas();
 }
 /* onde a pessoa estava antes de recarregar — só vale se ela ainda
@@ -7145,16 +7147,12 @@ function ouvirOutrasAbas() {
   });
 }
 
-/* toda gravação local agenda uma subida — sem travar a tela */
-var _saveLocal = save, _syncAgendado = null;
+/* A operação é gravada diretamente no servidor pela camada Dados.
+   `save()` permanece apenas como compatibilidade para preferências/UI
+   legadas; ele NÃO cria fila local e NÃO dispara um segundo sincronizador. */
+var _saveLocal = save;
 save = function () {
-  var deu = _saveLocal();
-  marcarAtividade();
-  contarFila(); pintarSync();
-  if (!SYNC.ligado) return deu;
-  if (_syncAgendado) clearTimeout(_syncAgendado);
-  _syncAgendado = setTimeout(function () { enviarPendentes(); }, 1500);
-  return deu;
+  return _saveLocal.apply(this, arguments);
 };
 
 /* ---------------- acesso na nuvem criado sozinho ----------------
@@ -8348,7 +8346,7 @@ sincronizar = function (depois) {
 var COPIAS = { lista: [], carregando: false, erro: "", ultima: null, feita: null };
 var REGISTRO = { lista: [], carregando: false, erro: "" };
 
-function copiasDisponiveis() { return SYNC.ligado && nuvemViva() && ["admin", "holding"].indexOf(SYNC.perfil) >= 0; }
+function copiasDisponiveis() { return typeof Sessao !== "undefined" && Sessao.ligada() && ["admin", "holding", "vyoha"].indexOf(Sessao.perfil()) >= 0; }
 
 function garantirCopiaDoDia(depois) {
   if (!copiasDisponiveis()) return depois && depois(false);
@@ -9899,48 +9897,30 @@ function painelCrediario() {
   window.tourJaVisto = function (chave) { return !!toursVistos()[chave]; };
 
   /* ─────────────────────────────────────────────────────────
-     4. O QUE FOI DESLIGADO, E POR QUÊ
+     4. COMPATIBILIDADE COM CÓDIGO LEGADO
 
-     Estas funções existiam para compensar a falta de uma
-     autenticação de verdade. Com o Auth no lugar, elas não têm
-     mais o que fazer — e deixá-las vivas seria manter dois
-     caminhos para a mesma coisa, que é como bug nasce.
-
-     Viram função vazia em vez de sumirem, porque o vapp.js
-     ainda as chama de alguns lugares. Na Etapa 7, quando o
-     vapp.js for limpo, elas somem de vez.
+     O mecanismo antigo de fila/espelho continua definido acima apenas
+     porque existem trechos históricos no arquivo que ainda o referenciam.
+     Ele NÃO participa da sincronização atual. A fonte oficial é Dados +
+     Supabase, e a atualização entre computadores é TempoReal.
      ───────────────────────────────────────────────────────── */
 
   var DESLIGADAS = [
-    "publicarAmbiente",          /* mandava o DB inteiro para o servidor */
+    "publicarAmbiente",
     "vincularAcessoNuvem",
     "confirmarPerfilNuvem",
     "removerAmbienteDoComputador",
-    "criarContaNuvem",           /* agora é gerir_perfil + Auth */
+    "criarContaNuvem",
     "alinharSenhaNuvem",
     "conectarNuvem",
     "religarNuvem",
-    "sincronizar",               /* não existe mais sincronismo */
+    "sincronizar",
     "enviarPendentes",
     "puxarDaNuvem",
     "lacoSync",
     "marcarAtividade",
     "migrarSenhas",
     "protegerSenha",
-
-    /* ACHADAS NA VARREDURA DOS 26 PONTOS DE GRAVAÇÃO
-
-       instalarAmbiente() escreve em DB.config, DB.users,
-       DB.tenants e DB.customers a partir do "pacote de
-       ambiente" que o mecanismo antigo publicava.
-
-       Ela já estava fora de alcance — as três funções que a
-       chamavam foram desligadas. Mas depender de estarem
-       desligadas é depender de ninguém religar uma delas por
-       engano num dia distraído.
-
-       Desligar a própria fecha o caminho, não a porta de
-       entrada dele. */
     "instalarAmbiente",
     "buscarAmbienteNuvem",
     "baixarAmbiente",
@@ -9955,8 +9935,54 @@ function painelCrediario() {
     }
   });
 
-  /* O chip de sincronização usa apenas o estado real do sistema.
-     O antigo indicador de "Migração em andamento" foi removido. */
+  /* O chip não mostra mais a antiga migração. Quando tudo está normal,
+     ele fica oculto. Se o Realtime cair, mostra somente o estado real da
+     conexão — nunca uma fila ou "migração" inventada. */
+  window.syncPrecisaAparecer = function () {
+    if (typeof Sessao === "undefined" || !Sessao.ligada()) return false;
+    return !(typeof TempoReal !== "undefined" && TempoReal.estaVivo());
+  };
+
+  window.textoSync = function () {
+    if (typeof Sessao === "undefined" || !Sessao.ligada()) {
+      return ["Sem sessão", "nenhum dado operacional é sincronizado sem acesso ao servidor"];
+    }
+    if (typeof TempoReal !== "undefined" && TempoReal.estaVivo()) {
+      return ["Sincronização ativa", "dados gravados no servidor e atualização em tempo real"];
+    }
+    return ["Reconectando", "a atualização em tempo real será restabelecida automaticamente"];
+  };
+
+  window.pintarSync = function () {
+    var e = el("sync-chip");
+    if (!e) return;
+    if (!syncPrecisaAparecer()) { e.classList.add("hidden"); return; }
+    e.className = "sync inf";
+    e.classList.remove("hidden");
+    var t = textoSync();
+    e.title = t[1];
+    e.innerHTML = '<span class="sync-p"></span>' + esc(t[0]);
+  };
+
+  window.modalSync = function () {
+    var ativo = typeof TempoReal !== "undefined" && TempoReal.estaVivo();
+    var assinadas = ativo && typeof TempoReal.assinadas === "function" ? TempoReal.assinadas() : [];
+    modal("Sincronização",
+      nota("<b>" + (ativo ? "Sincronização ativa" : "Reconectando") + "</b> — " +
+        (ativo ? "o servidor é a fonte oficial dos dados." : "a conexão em tempo real será restabelecida automaticamente."),
+        ativo ? "ok" : "wr") +
+      ln("Empresa", Sessao.empresa() || "—") +
+      ln("Perfil", Sessao.perfil() || "—") +
+      ln("Tempo real", ativo ? "conectado" : "reconectando") +
+      ln("Tabelas acompanhadas", String(assinadas.length)) +
+      '<div class="hp" style="margin-top:12px">As gravações são feitas diretamente no servidor. ' +
+      'Não existe fila local de alterações nem etapa de migração para o cliente executar.</div>',
+      '<button class="btn btn-p" onclick="fecharModal()">Fechar</button>');
+  };
+
+  try {
+    TempoReal.quandoMudarEstado(function () { pintarSync(); });
+  } catch (e) {}
 
   /* ─────────────────────────────────────────────────────────
      5. ARRANQUE
