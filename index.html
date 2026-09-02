@@ -10286,9 +10286,9 @@ function painelCrediario() {
      catálogo, custo e estoque na mesma transação — e recusa
      quem não é gestor, no servidor.
 
-     O estoque inicial não vai junto: criar produto e movimentar
-     estoque são coisas diferentes, e o movimento precisa de
-     motivo e autor. Vai como movimentação logo depois.
+     O estoque é definido diretamente por uma RPC própria. Venda e
+     movimentação manual são fluxos separados; editar cadastro não
+     pode ser interpretado como uma saída de estoque.
      ───────────────────────────────────────────────────────── */
 
   window.salvarProduto = function (id) {
@@ -10317,13 +10317,10 @@ function painelCrediario() {
     Dados.chamar("salvar_produto", { produto: produto, custo: custo, estoque: {} })
       .then(function (r) {
         if (r && r.erro) { liberar(); return bad(r.erro); }
-        var diferenca = estoqueDesejado - estoqueAtual;
-        if (!diferenca) return null;
-        return Dados.chamar("movimentar_estoque", {
+        return Dados.chamar("definir_estoque", {
           pedido: {
             product_id: pid,
-            quantidade: Math.abs(diferenca),
-            tipo: diferenca > 0 ? "entrada" : "saida",
+            saldo: estoqueDesejado,
             motivo: novo ? "Estoque inicial" : "Ajuste de estoque",
             custo: custoValor
           }
@@ -12561,7 +12558,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 
    O QUE A AUDITORIA ACHOU
 
-   Sete gravacoes passam por funcao transacional no servidor.
+   O cadastro de produto e o ajuste direto de estoque passam por funções transacionais no servidor.
    Tres estavam protegidas de verdade — venda, recebimento e
    acordo — porque guardavam a chave numa variavel e a
    reaproveitavam na segunda tentativa.
@@ -12651,6 +12648,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
      --------------------------------------------------------------- */
   var ONDE = {
     movimentar_estoque: function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
+    definir_estoque:    function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
     salvar_produto:     function (a, k) { if (a && a.produto) { a.produto.chave_tentativa = k; } },
     estornar_parcela:   function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
     cancelar_venda:     function (a, k) { if (a)              { a.chave                   = k; } }
