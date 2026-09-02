@@ -4193,18 +4193,11 @@ function modalProduto(id) {
   var corpo = '<div class="rw rw2"><div class="fld"><label>Nome do produto <span class="rq">*</span></label><input id="p-nome" value="' + esc(p ? p.nome : "") + '"></div>' +
     '<div class="fld"><label>Código</label><input id="p-cod" value="' + esc(p ? p.cod : "SKU" + (1000 + Math.floor(Math.random() * 9000))) + '"></div></div>' +
     '<div class="rw rw2"><div class="fld"><label>Categoria <span class="rq">*</span></label><input id="p-cat" list="cats" value="' + esc(p ? p.categoria : "") + '">' +
-    '<datalist id="cats">' + cats.map(function (x) { return "<option>" + esc(x) + "</option>"; }).join("") + "</datalist></div>" +
+    '<datalist id="cats">' + cats.map(function (x) { return "<option>" + esc(x) + "</option>"; }).join("") + '</datalist></div>' +
     '<div class="fld"><label>Fornecedor</label><input id="p-forn" value="' + esc(p ? p.fornecedor : "") + '"></div></div>' +
-    '<div class="rw rw4"><div class="fld"><label>Custo (R$)</label><input id="p-custo" type="number" step="0.01" value="' + (p ? p.custo : "") + '"></div>' +
-    '<div class="fld"><label>Preço (R$) <span class="rq">*</span></label><input id="p-preco" type="number" step="0.01" value="' + (p ? p.preco : "") + '"></div>' +
-    '<div class="fld"><label>Estoque ' + (p ? "(via movimentação)" : "inicial") + '</label><input id="p-est" type="number" ' + (p ? "disabled" : "") + ' value="' + (p ? p.estoque : 0) + '"></div>' +
-    /* em branco = "usa o padrão da empresa", 0 = "não me avise".
-       Por isso o valor só aparece preenchido quando alguém
-       definiu — o placeholder mostra qual é o padrão sem fingir
-       que ele foi escolhido para este produto. */
-    '<div class="fld"><label>Estoque mínimo</label><input id="p-min" type="number" min="0" placeholder="padrão: ' +
-    (Number(cfg().estoque_min || 3)) + '" value="' + (p && p.min != null ? p.min : "") +
-    '"><div class="sm mut" style="margin-top:4px">Em branco usa o padrão da empresa. Zero desliga o aviso de reposição deste produto.</div></div></div>' +
+    '<div class="rw rw3"><div class="fld"><label>Custo (R$)</label><input id="p-custo" type="number" step="0.01" min="0" value="' + (p ? p.custo : "") + '"></div>' +
+    '<div class="fld"><label>Preço (R$) <span class="rq">*</span></label><input id="p-preco" type="number" step="0.01" min="0" value="' + (p ? p.preco : "") + '"></div>' +
+    '<div class="fld"><label>Estoque</label><input id="p-est" type="number" step="1" min="0" value="' + (p ? Math.max(0, Math.round(Number(p.estoque || 0))) : 0) + '"></div></div>' +
     '<div id="p-err" class="note ng hidden"></div>';
   modal(p ? "Editar produto" : "Novo produto", corpo,
     (p && isAdmin() ? '<button class="btn btn-d" style="margin-right:auto" onclick="removerProduto(\'' + p.id + '\')">' + ICON.trash + "Excluir</button>" : "") +
@@ -10280,96 +10273,50 @@ function painelCrediario() {
      ───────────────────────────────────────────────────────── */
 
   window.salvarProduto = function (id) {
-    var nome = v("p-nome"), cat = v("p-cat"), preco = nv("p-preco"), err = el("p-err");
-
-    function bad(m) {
-      err.innerHTML = "<span>" + ICON.alert + "</span><div>" + esc(m) + "</div>";
-      err.classList.remove("hidden");
-    }
-
+    var nome = v("p-nome"), cat = v("p-cat"), preco = nv("p-preco"), custoValor = nv("p-custo"), estoqueDesejado = Math.max(0, Math.round(nv("p-est"))), err = el("p-err");
+    function bad(m) { err.innerHTML = "<span>" + ICON.alert + "</span><div>" + esc(m) + "</div>"; err.classList.remove("hidden"); }
     if (nome.length < 2) return bad("Informe o nome do produto.");
     if (!cat) return bad("Informe a categoria.");
     if (preco <= 0) return bad("O preço de venda deve ser maior que zero.");
+    if (custoValor < 0) return bad("O custo não pode ser negativo.");
 
     var novo = !id;
     var pid = id || uid("p");
-    var estoqueInicial = novo ? Math.max(0, Math.round(nv("p-est"))) : 0;
-
-    var produto = {
-      id: pid, nome: nome, cod: v("p-cod"), categoria: cat,
-      fornecedor: v("p-forn"), preco: preco, status: "ativo"
-    };
-    var custo = {
-      custo: nv("p-custo"),
-      preco_atacado: nv("p-atacado") || null,
-      fornecedor: v("p-forn")
-    };
-
-    /* O MÍNIMO VAI NUM PACOTE SÓ DELE
-
-       Não é do catálogo: mora na tabela `estoque`, ao lado do
-       saldo. Por isso é o terceiro jsonb da RPC, e não um campo
-       dentro do `produto`.
-
-       CAMPO VAZIO E ZERO SÃO COISAS DIFERENTES:
-         vazio → null → usa o padrão da empresa
-         0     → 0    → nunca avisa sobre este produto
-
-       E é por isso que a leitura é do texto cru, não do `nv()`:
-       `nv("")` devolve 0, e isso apagaria a diferença logo na
-       entrada — o campo em branco viraria "nunca avise". */
-    var minBruto = v("p-min");
-    var minimo = minBruto === "" ? null : Number(minBruto.replace(",", "."));
-    if (minimo !== null && (!isFinite(minimo) || minimo < 0)) {
-      return bad("O estoque mínimo precisa ser um número igual ou maior que zero.");
-    }
-    var estoque = { minimo: minimo };
+    var produtoAtual = id ? find(DB.products, id) : null;
+    var estoqueAtual = novo ? 0 : Math.max(0, Math.round(Number((produtoAtual || {}).estoque || 0)));
+    var produto = { id: pid, nome: nome, cod: v("p-cod"), categoria: cat, fornecedor: v("p-forn"), preco: preco, status: "ativo" };
+    var custo = { custo: custoValor, preco_atacado: nv("p-atacado") || null, fornecedor: v("p-forn") };
 
     var botao = el("p-btn");
     if (botao) { botao.disabled = true; botao.textContent = "Salvando…"; }
     function liberar() { if (botao) { botao.disabled = false; botao.textContent = "Salvar"; } }
 
-    Dados.chamar("salvar_produto", { produto: produto, custo: custo, estoque: estoque })
+    Dados.chamar("salvar_produto", { produto: produto, custo: custo, estoque: {} })
       .then(function (r) {
-        if (r.erro) { liberar(); return bad(r.erro); }
-
-        var depois = Promise.resolve();
-
-        if (estoqueInicial > 0) {
-          depois = Dados.chamar("movimentar_estoque", {
-            pedido: { product_id: pid, quantidade: estoqueInicial,
-                      tipo: "entrada", motivo: "Estoque inicial" }
-          });
-        }
-
-        return depois.then(function (m) {
-          if (m && m.erro) { liberar(); return bad(m.erro); }
-
-          /* A GRAVAÇÃO FUNCIONOU E A TELA MOSTRAVA ZERO
-
-             O salvar_produto grava, o movimentar_estoque soma —
-             e a projeção continuava com o que tinha na memória
-             de antes. A tela mostrava o estado anterior à
-             gravação, e parecia que o estoque não tinha entrado.
-
-             O Realtime até traz a mudança, mas depois; e quem
-             acabou de clicar em salvar espera ver o resultado
-             agora, não daqui a pouco.
-
-             Quem grava, recarrega. */
-          return recarregarProdutos().then(function () {
-            logar(novo ? "Produto cadastrado" : "Produto alterado", nome);
-            err.classList.add("hidden");
-            fecharModal();
-            toast(novo ? "Produto cadastrado." : "Produto atualizado.", "ok");
-            ir(View.pg, View.p);
-          });
+        if (r && r.erro) { liberar(); return bad(r.erro); }
+        var diferenca = estoqueDesejado - estoqueAtual;
+        if (!diferenca) return null;
+        return Dados.chamar("movimentar_estoque", {
+          pedido: {
+            product_id: pid,
+            quantidade: Math.abs(diferenca),
+            tipo: diferenca > 0 ? "entrada" : "saida",
+            motivo: novo ? "Estoque inicial" : "Ajuste de estoque",
+            custo: custoValor
+          }
         });
       })
-      .catch(function () {
-        liberar();
-        bad("Não consegui falar com o servidor. Nada foi salvo.");
-      });
+      .then(function (m) {
+        if (m && m.erro) { liberar(); return bad(m.erro); }
+        return recarregarProdutos().then(function () {
+          logar(novo ? "Produto cadastrado" : "Produto alterado", nome);
+          err.classList.add("hidden");
+          fecharModal();
+          toast(novo ? "Produto cadastrado." : "Produto atualizado.", "ok");
+          ir(View.pg, View.p);
+        });
+      })
+      .catch(function () { liberar(); bad("Não foi possível salvar o produto. Tente novamente."); });
   };
 
   /* ─────────────────────────────────────────────────────────
