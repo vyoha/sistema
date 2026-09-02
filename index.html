@@ -984,7 +984,7 @@ var Dados = (function () {
   var ouvintes = {};
 
   /* as tabelas pequenas cabem inteiras; as grandes vêm por janela */
-  var INTEIRAS = ["equipe", "config_empresa", "metas", "products", "estoque", "restricoes"];
+  var INTEIRAS = ["equipe", "config_empresa", "metas", "products", "products_custo", "estoque", "restricoes"];
   var POR_JANELA = ["customers", "sales", "parcels", "moves", "cash",
                     "cobrancas", "acordos", "leads_empresa", "analises", "logs"];
 
@@ -1022,9 +1022,16 @@ var Dados = (function () {
      Em todos, o de versão menor ou igual é descartado.
      ───────────────────────────────────────────────────────── */
   function aplicar(tabela, registro) {
-    if (!registro || !registro.id) return false;
+    if (!registro) return false;
+    /* products_custo usa product_id como chave primária e não possui
+       necessariamente uma coluna `id`. Sem esta normalização, a consulta
+       retornava o custo do servidor, mas a projeção descartava todas as
+       linhas por não encontrar registro.id — e a tela mostrava R$ 0,00. */
+    var chave = registro.id || (tabela === "products_custo" ? registro.product_id : null);
+    if (!chave) return false;
+    if (tabela === "products_custo" && !registro.id) registro.id = chave;
     projecao[tabela] = projecao[tabela] || {};
-    var atual = projecao[tabela][registro.id];
+    var atual = projecao[tabela][chave];
     if (atual && registro.versao != null && atual.versao != null
         && registro.versao <= atual.versao) return false;   /* eco, ignora */
     projecao[tabela][registro.id] = registro;
@@ -10246,7 +10253,7 @@ function painelCrediario() {
         repovoarConfig(); redesenhar();
       });
 
-      TempoReal.assinarVarias(["products", "estoque", "moves", "config_empresa"]);
+      TempoReal.assinarVarias(["products", "products_custo", "estoque", "moves", "config_empresa"]);
       return true;
     });
   };
@@ -12628,12 +12635,19 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
   }
 
   /* a chave do modal que esta por cima */
-  function f12_chaveAtual() {
+  function f12_chaveAtual(operacao) {
     try {
       if (!window.MDS || !MDS.length) { return null; }
       var id = MDS[MDS.length - 1];
-      if (!F12_CHAVES[id]) { F12_CHAVES[id] = f12_uuid(); }
-      return F12_CHAVES[id];
+      F12_CHAVES[id] = F12_CHAVES[id] || {};
+      /* Uma chave identifica UMA intenção de UMA operação.
+         Salvar produto e lançar estoque acontecem no mesmo modal,
+         mas são duas transações diferentes e precisam de chaves
+         diferentes. O mesmo botão clicado duas vezes continua
+         usando a mesma chave da sua operação. */
+      var chave = String(operacao || 'geral');
+      if (!F12_CHAVES[id][chave]) F12_CHAVES[id][chave] = f12_uuid();
+      return F12_CHAVES[id][chave];
     } catch (e) { return null; }
   }
 
@@ -12641,7 +12655,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     var modalAntigo = modal;
     modal = function () {
       var id = modalAntigo.apply(this, arguments);
-      try { F12_CHAVES[id] = f12_uuid(); } catch (e) {}
+      try { F12_CHAVES[id] = {}; } catch (e) {}
       return id;
     };
     try { window.modal = modal; } catch (e) {}
@@ -12678,7 +12692,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
       try {
         var por = ONDE[funcao];
         if (por) {
-          var k = f12_chaveAtual();
+          var k = f12_chaveAtual(funcao);
           if (k) { por(argumentos, k); }
         }
       } catch (e) {}
