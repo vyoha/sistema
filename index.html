@@ -3260,7 +3260,7 @@ function quickSearch(t) {
 /* =======================================================================
    DASHBOARD
    ======================================================================= */
-var UI = { per: "mes", vBusca: "", vSt: "", lStatus: "", nTab: "cobranca", cBusca: "", cFiltro: "", pBusca: "", pCat: "", pDisp: false, pArq: false, fTab: "geral", rTab: "comercial", cfgTab: "empresa" };
+var UI = { per: "mes", vBusca: "", vSt: "", lStatus: "", nTab: "cobranca", cBusca: "", cFiltro: "", pBusca: "", pCat: "", pDisp: "", pArq: false, fTab: "geral", rTab: "comercial", cfgTab: "empresa" };
 var _debBuscaProdutos = null;
 function deb() {
   clearTimeout(_debBuscaProdutos);
@@ -4105,7 +4105,8 @@ function pg_produtos() {
   var l = (UI.pArq ? arquivados : ativos).slice(), c = cfg();
   if (UI.pBusca) l = l.filter(function (p) { return (p.nome + " " + p.cod + " " + p.categoria).toLowerCase().indexOf(UI.pBusca.toLowerCase()) >= 0; });
   if (UI.pCat) l = l.filter(function (p) { return p.categoria === UI.pCat; });
-  if (UI.pDisp) l = l.filter(function (p) { return p.estoque > 0; });
+  if (UI.pDisp === "disponivel") l = l.filter(function (p) { return p.estoque > 0; });
+  if (UI.pDisp === "indisponivel") l = l.filter(function (p) { return p.estoque <= 0; });
   l = srt(l, function (p) { return p.nome; });
   var cats = Object.keys(grp(ativos, function (p) { return p.categoria; })).sort();
   var falta = ativos.filter(precisaRepor);
@@ -4120,7 +4121,7 @@ function pg_produtos() {
     '<div class="srch"><span class="i">' + ICON.search + '</span><input id="f-p" placeholder="Produto, código ou categoria" value="' + esc(UI.pBusca) + '" oninput="UI.pBusca=this.value;deb()"></div>' +
     '<select onchange="UI.pCat=this.value;ir(\'produtos\')" style="height:38px;border:1px solid var(--line);border-radius:10px;padding:0 10px"><option value="">Todas as categorias</option>' +
     cats.map(function (x) { return "<option" + (UI.pCat === x ? " selected" : "") + ">" + esc(x) + "</option>"; }).join("") + "</select>" +
-    '<label class="opt" style="margin:0;height:38px"><input type="checkbox" ' + (UI.pDisp ? "checked" : "") + ' onchange="UI.pDisp=this.checked;ir(\'produtos\')"><span>Somente disponíveis</span></label>' +
+    '<select onchange="UI.pDisp=this.value;ir(\'produtos\')" style="height:38px;border:1px solid var(--line);border-radius:10px;padding:0 10px"><option value="">Todos os estoques</option><option value="disponivel"' + (UI.pDisp === "disponivel" ? " selected" : "") + '>Disponíveis</option><option value="indisponivel"' + (UI.pDisp === "indisponivel" ? " selected" : "") + '>Indisponíveis</option></select>' +
     (arquivados.length ? '<label class="opt" style="margin:0;height:38px"><input type="checkbox" ' + (UI.pArq ? "checked" : "") +
       ' onchange="UI.pArq=this.checked;ir(\'produtos\')"><span>Ver arquivados (' + arquivados.length + ")</span></label>" : "") +
     '<div style="margin-left:auto" class="sm mut">' + l.length + " produtos listados</div></div>";
