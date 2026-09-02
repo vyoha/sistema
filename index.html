@@ -3261,6 +3261,16 @@ function quickSearch(t) {
    DASHBOARD
    ======================================================================= */
 var UI = { per: "mes", vBusca: "", vSt: "", lStatus: "", nTab: "cobranca", cBusca: "", cFiltro: "", pBusca: "", pCat: "", pDisp: false, pArq: false, fTab: "geral", rTab: "comercial", cfgTab: "empresa" };
+var _debBuscaProdutos = null;
+function deb() {
+  clearTimeout(_debBuscaProdutos);
+  _debBuscaProdutos = setTimeout(function () {
+    ir("produtos");
+    var e = el("f-p");
+    if (e) { e.focus(); try { e.selectionStart = e.value.length; e.selectionEnd = e.value.length; } catch (x) {} }
+  }, 180);
+}
+
 function periodo() {
   var t = today();
   if (UI.per === "tudo") return ["1900-01-01", t, "desde o início", "1900-01-01", "1900-01-01"];
@@ -4104,15 +4114,6 @@ function pg_produtos() {
   var h = head("Produtos", "O que está disponível para vender agora, quanto tem e o que mais sai",
     (isAdmin() ? '<button class="btn btn-p" onclick="modalProduto()">' + ICON.plus + "Novo produto</button>" +
       '<button class="btn" onclick="modalEstoque()">' + ICON.box + "Entrada de estoque</button>" : ""));
-  h += '<div class="grid c4" style="margin-bottom:20px">' +
-    metric("Itens disponíveis", n0(sum(ativos, function (p) { return p.estoque; })), ativos.length + " produtos cadastrados") +
-    /* o vendedor não enxerga custo: o que ele precisa é o que vai vender */
-    (isAdmin()
-      ? metric("Valor em estoque", money(sum(ativos, function (p) { return p.estoque * p.custo; })), "a preço de custo")
-      : metric("Valor do catálogo", money(sum(ativos, function (p) { return p.estoque * p.preco; })), "a preço de venda")) +
-    metric("Precisam de reposição", n0(falta.length), falta.length ? "no estoque mínimo ou abaixo" : "estoque saudável", falta.length ? "neg" : "pos") +
-    metric("Mais vendido (90 dias)", top && top.q ? esc(top.p.nome.split(" ").slice(0, 2).join(" ")) : "—", top && top.q ? top.q + " unidades" : "sem saídas") +
-    "</div>";
   if (falta.length) h += nota("<b>Reposição:</b> " + esc(falta.slice(0, 4).map(function (p) { return p.nome + " (" + p.estoque + ")"; }).join(" · ")) + (falta.length > 4 ? " e mais " + (falta.length - 4) : ""), "wr");
 
   h += '<div class="filters">' +
@@ -4214,80 +4215,16 @@ function modalProduto(id) {
     '<div class="rw rw2"><div class="fld"><label>Categoria <span class="rq">*</span></label><input id="p-cat" list="cats" value="' + esc(p ? p.categoria : "") + '">' +
     '<datalist id="cats">' + cats.map(function (x) { return "<option>" + esc(x) + "</option>"; }).join("") + '</datalist></div>' +
     '<div class="fld"><label>Fornecedor</label><input id="p-forn" value="' + esc(p ? p.fornecedor : "") + '"></div></div>' +
-    '<div class="rw rw3"><div class="fld"><label>Custo (R$)</label><input id="p-custo" type="number" step="0.01" min="0" value="' + (p ? p.custo : "") + '"></div>' +
-    '<div class="fld"><label>Preço (R$) <span class="rq">*</span></label><input id="p-preco" type="number" step="0.01" min="0" value="' + (p ? p.preco : "") + '"></div>' +
+    '<div class="rw rw3"><div class="fld"><label>Custo (R$)</label><input id="p-custo" type="text" inputmode="decimal" autocomplete="off" value="' + (p && p.custo != null ? String(p.custo) : "") + '"></div>' +
+    '<div class="fld"><label>Preço (R$) <span class="rq">*</span></label><input id="p-preco" type="text" inputmode="decimal" autocomplete="off" value="' + (p ? String(p.preco || "") : "") + '"></div>' +
     '<div class="fld"><label>Estoque</label><input id="p-est" type="number" step="1" min="0" value="' + (p ? Math.max(0, Math.round(Number(p.estoque || 0))) : 0) + '"></div></div>' +
     '<div id="p-err" class="note ng hidden"></div>';
   modal(p ? "Editar produto" : "Novo produto", corpo,
     (p && isAdmin() ? '<button class="btn btn-d" style="margin-right:auto" onclick="removerProduto(\'' + p.id + '\')">' + ICON.trash + "Excluir</button>" : "") +
     '<button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn btn-p" onclick="salvarProduto(' + (p ? "'" + p.id + "'" : "null") + ')">Salvar</button>', true);
 }
-function salvarProduto(id) {
-  var nome = v("p-nome"), cat = v("p-cat"), preco = nv("p-preco"), err = el("p-err");
-  function bad(m) { err.innerHTML = "<span style='width:17px'>" + ICON.alert + "</span><div>" + m + "</div>"; err.classList.remove("hidden"); }
-  if (nome.length < 2) return bad("Informe o nome do produto.");
-  if (!cat) return bad("Informe a categoria.");
-  if (preco <= 0) return bad("O preço de venda deve ser maior que zero.");
-  if (id) {
-    var p = find(DB.products, id);
-    p.nome = nome; p.cod = v("p-cod"); p.categoria = cat; p.fornecedor = v("p-forn");
-    p.custo = nv("p-custo"); p.preco = preco; p.min = nv("p-min") || 3;
-    logar("Produto alterado", nome); toast("Produto atualizado.", "ok");
-  } else {
-    var novo = {
-      id: uid("p"), tenant_id: T(), cod: v("p-cod"), nome: nome, categoria: cat, fornecedor: v("p-forn"),
-      custo: nv("p-custo"), preco: preco, estoque: Math.max(0, Math.round(nv("p-est"))), min: nv("p-min") || 3, status: "ativo", criado: today()
-    };
-    DB.products.push(novo);
-    if (novo.estoque > 0) DB.moves.push({ id: uid("m"), tenant_id: T(), product_id: novo.id, tipo: "entrada", qtd: novo.estoque, motivo: "Estoque inicial", user_id: Sess.user_id, data: new Date().toISOString() });
-    logar("Produto cadastrado", nome); toast("Produto cadastrado.", "ok");
-  }
-  save(); fecharModal(); if (DW) recarregarDrawer(); else ir("produtos");
-}
-/* ---------- tirar um produto do catálogo ----------
-   Se ele nunca foi vendido, sai de vez. Se já entrou em alguma venda, é
-   arquivado: apagar reescreveria o histórico de vendas e o financeiro. */
-function produtoVendido(id) {
-  return Q("sales").some(function (s) {
-    return (s.itens || []).some(function (i) { return i.product_id === id; });
-  });
-}
-function removerProduto(id) {
-  var p = find(DB.products, id);
-  if (!p || p.tenant_id !== T() || !isAdmin()) return;
-  if (produtoVendido(id)) {
-    return confirmar("Arquivar " + esc(p.nome) + "?",
-      "Este produto já entrou em venda, então ele não pode ser apagado sem reescrever o histórico. " +
-      "Arquivando, ele sai do catálogo e do PDV na hora e as vendas antigas continuam corretas. Dá para reativar depois.",
-      function () { arquivarProduto(id); }, "Arquivar", true);
-  }
-  confirmar("Excluir " + esc(p.nome) + "?",
-    "O produto nunca foi vendido, então ele sai do sistema junto com as movimentações de estoque dele. Não dá para desfazer.",
-    function () { apagarProduto(id); }, "Excluir", true);
-}
-function apagarProduto(id) {
-  var p = find(DB.products, id);
-  if (!p || p.tenant_id !== T() || !isAdmin()) return;
-  if (produtoVendido(id)) return arquivarProduto(id);
-  DB.moves = DB.moves.filter(function (m) { return m.product_id !== id; });
-  DB.products = DB.products.filter(function (x) { return x.id !== id; });
-  logar("Produto excluído", p.nome);
-  save(); fecharModal(); fecharDrawer(); toast("Produto excluído.", "ok"); ir("produtos");
-}
-function arquivarProduto(id) {
-  var p = find(DB.products, id);
-  if (!p || p.tenant_id !== T() || !isAdmin()) return;
-  p.status = "inativo"; p.arquivado = new Date().toISOString();
-  logar("Produto arquivado", p.nome);
-  save(); fecharModal(); fecharDrawer(); toast("Produto arquivado — some do catálogo e do PDV.", "ok"); ir("produtos");
-}
-function reativarProduto(id) {
-  var p = find(DB.products, id);
-  if (!p || p.tenant_id !== T() || !isAdmin()) return;
-  p.status = "ativo"; delete p.arquivado;
-  logar("Produto reativado", p.nome);
-  save(); fecharModal(); fecharDrawer(); toast("Produto de volta ao catálogo.", "ok"); ir("produtos");
-}
+/* O salvamento oficial é definido no Bloco 2 acima, com servidor como autoridade.
+   Esta função legada não pode sobrescrevê-lo. */
 function modalEstoque(pid) {
   var prods = srt(Q("products").filter(function (p) { return p.status !== "inativo"; }), function (p) { return p.nome; });
   var corpo = '<div class="fld"><label>Produto</label><select id="e-prod">' + prods.map(function (p) {
@@ -10291,8 +10228,24 @@ function painelCrediario() {
      pode ser interpretado como uma saída de estoque.
      ───────────────────────────────────────────────────────── */
 
+  function nvDinheiroProduto(id) {
+    var s = String(v(id) || "").trim();
+    if (!s) return 0;
+    s = s.replace(/R\$|\s/g, "");
+    /* No padrão brasileiro, ponto separa milhares e vírgula separa centavos.
+       2.259 => 2259 | 2.259,90 => 2259.90 | 2,25 => 2.25 */
+    if (s.indexOf(",") >= 0) {
+      s = s.replace(/\./g, "").replace(",", ".");
+    } else {
+      s = s.replace(/\./g, "");
+    }
+    s = s.replace(/[^0-9.\-]/g, "");
+    var n = parseFloat(s);
+    return isNaN(n) ? 0 : n;
+  }
+
   window.salvarProduto = function (id) {
-    var nome = v("p-nome"), cat = v("p-cat"), preco = nv("p-preco"), custoValor = nv("p-custo"), estoqueDesejado = Math.max(0, Math.round(nv("p-est"))), err = el("p-err");
+    var nome = v("p-nome"), cat = v("p-cat"), preco = nvDinheiroProduto("p-preco"), custoValor = nvDinheiroProduto("p-custo"), estoqueDesejado = Math.max(0, Math.round(nv("p-est"))), err = el("p-err");
     function bad(m) { err.innerHTML = "<span>" + ICON.alert + "</span><div>" + esc(m) + "</div>"; err.classList.remove("hidden"); }
     if (nome.length < 2) return bad("Informe o nome do produto.");
     if (!cat) return bad("Informe a categoria.");
