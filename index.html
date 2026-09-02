@@ -1777,7 +1777,10 @@ var TIPO_META = {
   faturamento: { nome: "Faturamento", desc: "Valor vendido no mês", un: "R$" },
   recebimento: { nome: "Recebimento em caixa", desc: "Valor efetivamente recebido", un: "R$" },
   vendas: { nome: "Quantidade de vendas", desc: "Número de vendas fechadas", un: "vendas" },
-  personalizada: { nome: "Meta personalizada", desc: "Acompanhamento manual (ex.: cestas básicas)", un: "un" }
+  personalizada: { nome: "Meta personalizada", desc: "Acompanhamento manual", un: "un" },
+  unidades_produto: { nome: "Unidades de produto", desc: "Quantidade de um produto vendido", un: "un" },
+  unidades_categoria: { nome: "Unidades de categoria", desc: "Quantidade vendida de uma categoria", un: "un" },
+  combinada: { nome: "Faturamento + quantidade", desc: "Acompanhe faturamento e quantidade juntos", un: "R$" }
 };
 var CAT_SAIDA = ["Fornecedor / Mercadoria", "Aluguel", "Energia e água", "Internet e telefone", "Salários", "Comissões", "Marketing", "Impostos", "Manutenção", "Outros"];
 var CAT_ENTRADA = ["Recebimento de venda", "Entrada de venda", "Aporte de sócio", "Outras receitas"];
@@ -2271,18 +2274,39 @@ function metasDoMes(mes, tid) {
   return DB.metas.filter(function (m) { return m.tenant_id === tid && m.mes === mes; });
 }
 function progressoMeta(m) {
-  var ini = m.mes + "-01", fim = mFim(ini), realizado = 0;
+  var ini = m.mes + "-01", fim = mFim(ini), realizado = 0, alvo = Number(m.alvo || 0);
   var vs = DB.sales.filter(function (s) { return s.tenant_id === m.tenant_id && s.status !== "cancelada" && s.data >= ini && s.data <= fim; });
   if (m.tipo === "faturamento") realizado = r2(sum(vs, function (s) { return s.total; }));
   else if (m.tipo === "vendas") realizado = vs.length;
   else if (m.tipo === "recebimento") realizado = r2(sum(DB.cash.filter(function (x) { return x.tenant_id === m.tenant_id && x.tipo === "entrada" && x.data >= ini && x.data <= fim; }), function (x) { return x.valor; }));
-  else realizado = Number(m.realizado_manual || 0);
-  var pct = m.alvo > 0 ? realizado / m.alvo * 100 : 0;
+  else if (m.tipo === "unidades_produto") {
+    realizado = sum(vs, function (s) { return sum((s.itens || []).filter(function (i) { return i.product_id === m.produto_id; }), function (i) { return Number(i.qtd || 0); }); });
+  } else if (m.tipo === "unidades_categoria") {
+    realizado = sum(vs, function (s) { return sum((s.itens || []).filter(function (i) {
+      var p = find(DB.products, i.product_id) || {};
+      return String(p.categoria || "").trim().toLowerCase() === String(m.categoria || "").trim().toLowerCase();
+    }), function (i) { return Number(i.qtd || 0); }); });
+  } else if (m.tipo === "combinada") {
+    var fat = r2(sum(vs, function (s) { return s.total; }));
+    var qtd = vs.length;
+    realizado = { faturamento: fat, quantidade: qtd };
+  } else realizado = Number(m.realizado_manual || 0);
+
+  var pct;
+  if (m.tipo === "combinada") {
+    var pf = Number(m.alvo_faturamento || 0) > 0 ? realizado.faturamento / Number(m.alvo_faturamento) * 100 : 100;
+    var pq = Number(m.alvo_vendas || 0) > 0 ? realizado.quantidade / Number(m.alvo_vendas) * 100 : 100;
+    pct = Math.min(pf, pq);
+  } else pct = alvo > 0 ? realizado / alvo * 100 : 0;
+
   var un = TIPO_META[m.tipo] ? TIPO_META[m.tipo].un : "un";
   return {
-    realizado: realizado, pct: pct, alvo: m.alvo, un: un,
-    fmt: function (x) { return un === "R$" ? money(x) : n0(x) + (un === "vendas" ? "" : " " + un); },
-    falta: Math.max(0, r2(m.alvo - realizado)),
+    realizado: realizado, pct: pct, alvo: alvo, un: un,
+    fmt: function (x) {
+      if (m.tipo === "combinada") return money(x);
+      return un === "R$" ? money(x) : n0(x) + (un === "vendas" ? "" : " " + un);
+    },
+    falta: m.tipo === "combinada" ? Math.max(0, r2(Number(m.alvo_faturamento || 0) - realizado.faturamento)) : Math.max(0, r2(alvo - realizado)),
     encerrado: fim < today(), atingida: pct >= 100
   };
 }
@@ -4325,12 +4349,13 @@ function pg_financeiro(p) {
     h += '<div class="grid c4" style="margin-bottom:20px">' +
       metric("Metas do mês", n0(lista.length), doGrupo.length ? n0(doGrupo.length) + " definidas pelo grupo" : "definidas pela empresa") +
       metric("Metas batidas", n0(batidas), lista.length ? pc(batidas / lista.length * 100) + " do total" : "nenhuma meta definida", batidas ? "pos" : "") +
-      metric("Meta de faturamento", (function () {
-        var f = lista.filter(function (m) { return m.tipo === "faturamento"; })[0];
-        return f ? money(f.alvo) : "—";
+      metric("Objetivo principal", (function () {
+        var f = lista[0];
+        if (!f) return "—";
+        return f.tipo === "combinada" ? money(f.alvo_faturamento || f.alvo) : (TIPO_META[f.tipo] && TIPO_META[f.tipo].un === "R$" ? money(f.alvo) : n0(f.alvo));
       })(), (function () {
-        var f = lista.filter(function (m) { return m.tipo === "faturamento"; })[0];
-        return f ? pc(progressoMeta(f).pct) + " atingido" : "sem meta de faturamento";
+        var f = lista[0];
+        return f ? (TIPO_META[f.tipo] ? TIPO_META[f.tipo].nome : f.tipo) + " · " + pc(progressoMeta(f).pct) : "nenhuma meta definida";
       })()) +
       metric("Bonificações", n0(lista.filter(function (m) { return m.premio; }).length), lista.filter(function (m) { return m.premio; }).length ? "com prêmio definido" : "nenhuma bonificação") +
       "</div>";
@@ -4578,49 +4603,85 @@ function exportReceber() {
 /* ---------- metas ---------- */
 function modalMeta(id, mes, tenantAlvo) {
   var m = id ? find(DB.metas, id) : null;
+  window.__metaEditFat = m ? (m.alvo_faturamento || "") : ""; window.__metaEditVendas = m ? (m.alvo_vendas || "") : ""; window.__metaEditProduto = m ? (m.produto_id || "") : ""; window.__metaEditCategoria = m ? (m.categoria || "") : "";
+  window.__metaCats = {}; Q("products").forEach(function (p) { if (p.categoria) window.__metaCats[p.categoria] = 1; });
   var alvoTid = tenantAlvo || (m ? m.tenant_id : T());
   var doGrupo = alvoTid !== T();
   mes = mes || (m ? m.mes : mesRef(today()));
-  var corpo = '<div class="rw rw2"><div class="fld"><label>Título da meta <span class="rq">*</span></label><input id="mt-tit" value="' + esc(m ? m.titulo : "") + '" placeholder="Ex.: Faturamento do mês"></div>' +
+  var produtos = Q("products").filter(function (p) { return p.status !== "inativo"; });
+  var cats = {}; produtos.forEach(function (p) { if (p.categoria) cats[p.categoria] = 1; });
+  var corpo = '<div class="rw rw2"><div class="fld"><label>Título da meta <span class="rq">*</span></label><input id="mt-tit" value="' + esc(m ? m.titulo : "") + '" placeholder="Ex.: Meta de setembro"></div>' +
     '<div class="fld"><label>Mês de referência</label><input id="mt-mes" type="month" value="' + mes + '"></div></div>' +
     '<div class="fld"><label>Tipo de meta</label><select id="mt-tipo" onchange="dicaMeta()">' +
-    Object.keys(TIPO_META).map(function (k) { return '<option value="' + k + '"' + (m && m.tipo === k ? " selected" : "") + ">" + TIPO_META[k].nome + " — " + TIPO_META[k].desc + "</option>"; }).join("") + "</select></div>" +
-    '<div class="rw rw2"><div class="fld"><label>Objetivo <span class="rq">*</span></label><input id="mt-alvo" type="number" step="0.01" value="' + (m ? m.alvo : "") + '"><div class="hp" id="mt-dica"></div></div>' +
-    '<div class="fld"><label>Prêmio / bonificação</label><input id="mt-premio" value="' + esc(m ? m.premio : "") + '" placeholder="Ex.: cesta básica para a equipe"></div></div>' +
+    Object.keys(TIPO_META).map(function (k) { return '<option value="' + k + '"' + (m && m.tipo === k ? " selected" : "") + ">" + TIPO_META[k].nome + " — " + TIPO_META[k].desc + "</option>"; }).join("") + '</select></div>' +
+    '<div id="mt-alvo-wrap" class="rw rw2"><div class="fld"><label>Objetivo <span class="rq">*</span></label><input id="mt-alvo" type="number" step="0.01" value="' + (m ? m.alvo : "") + '"><div class="hp" id="mt-dica"></div></div>' +
+    '<div class="fld"><label>Prêmio / bonificação</label><input id="mt-premio" value="' + esc(m ? m.premio : "") + '" placeholder="Ex.: bonificação da equipe"></div></div>' +
+    '<div id="mt-extra"></div>' +
     (doGrupo ? nota("Esta meta será enviada para <b>" + esc(nomeEmpresa(alvoTid)) + "</b> como meta do grupo.", "inf") : "") +
     '<div id="mt-err" class="note ng hidden"></div>';
   modal(m ? "Editar meta" : "Nova meta", corpo,
-    '<button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn btn-p" onclick="salvarMeta(' +
-    (m ? "'" + m.id + "'" : "null") + ",'" + alvoTid + "'," + (doGrupo ? "true" : "false") + ')">Salvar meta</button>');
+    '<button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn btn-p" onclick="salvarMeta(' + (m ? "'" + m.id + "'" : "null") + ", '" + alvoTid + "', " + (doGrupo ? "true" : "false") + ')">Salvar meta</button>');
   dicaMeta();
 }
 function dicaMeta() {
-  var t = TIPO_META[v("mt-tipo")] || TIPO_META.faturamento;
-  var e = el("mt-dica"); if (e) e.textContent = t.un === "R$" ? "Valor em reais" : t.un === "vendas" ? "Quantidade de vendas" : "Quantidade (ex.: 40 cestas)";
+  var tipo = v("mt-tipo") || "faturamento", t = TIPO_META[tipo] || TIPO_META.faturamento;
+  var e = el("mt-dica"); if (e) e.textContent = t.un === "R$" ? "Valor em reais" : t.un === "vendas" ? "Quantidade de vendas" : "Quantidade de unidades";
+  var extra = el("mt-extra"), wrap = el("mt-alvo-wrap");
+  if (!extra) return;
+  if (tipo === "combinada") {
+    if (wrap) wrap.classList.add("hidden");
+    extra.innerHTML = '<div class="rw rw2"><div class="fld"><label>Meta de faturamento (R$) <span class="rq">*</span></label><input id="mt-fat" type="number" step="0.01" value="' + (window.__metaEditFat || "") + '"></div>' +
+      '<div class="fld"><label>Meta de quantidade de vendas <span class="rq">*</span></label><input id="mt-vendas" type="number" step="1" value="' + (window.__metaEditVendas || "") + '"></div></div>';
+  } else if (tipo === "unidades_produto") {
+    if (wrap) wrap.classList.remove("hidden");
+    extra.innerHTML = '<div class="fld"><label>Produto <span class="rq">*</span></label><select id="mt-produto">' + produtosMetaOptions(window.__metaEditProduto) + '</select></div>';
+  } else if (tipo === "unidades_categoria") {
+    if (wrap) wrap.classList.remove("hidden");
+    extra.innerHTML = '<div class="fld"><label>Categoria <span class="rq">*</span></label><select id="mt-categoria">' + Object.keys(window.__metaCats || {}).sort().map(function (c) { return '<option value="' + esc(c) + '"' + (window.__metaEditCategoria === c ? " selected" : "") + '>' + esc(c) + '</option>'; }).join("") + '</select></div>';
+  } else {
+    if (wrap) wrap.classList.remove("hidden");
+    extra.innerHTML = "";
+  }
+}
+function produtosMetaOptions(sel) {
+  var ps = Q("products").filter(function (p) { return p.status !== "inativo"; });
+  return ps.map(function (p) { return '<option value="' + p.id + '"' + (sel === p.id ? " selected" : "") + '>' + esc(p.nome) + '</option>'; }).join("");
 }
 function salvarMeta(id, tid, doGrupo) {
-  /* sem empresa informada, a meta é da empresa de quem está logado — nunca órfã */
   tid = tid && tid !== "null" && tid !== "undefined" ? tid : T();
-  var tit = v("mt-tit"), alvo = nv("mt-alvo"), err = el("mt-err");
+  var tit = v("mt-tit"), tipo = v("mt-tipo"), alvo = nv("mt-alvo"), err = el("mt-err");
   function bad(x) { err.innerHTML = "<span>" + ICON.alert + "</span><div>" + x + "</div>"; err.classList.remove("hidden"); }
   if (tit.length < 3) return bad("Informe o título da meta.");
-  if (alvo <= 0) return bad("Informe um objetivo maior que zero.");
-  var mes = v("mt-mes") || mesRef(today());
-  if (id) {
-    var m = find(DB.metas, id);
-    m.titulo = tit; m.alvo = alvo; m.tipo = v("mt-tipo"); m.premio = v("mt-premio"); m.mes = mes;
-    toast("Meta atualizada.", "ok");
+  var corpo = { titulo: tit, tipo: tipo, premio: v("mt-premio"), mes: v("mt-mes") || mesRef(today()), autor: Sess.user_id, realizado_manual: 0 };
+  if (tipo === "combinada") {
+    var fat = nv("mt-fat"), vendas = Math.round(nv("mt-vendas"));
+    if (!(fat > 0) || !(vendas > 0)) return bad("Informe a meta de faturamento e a quantidade de vendas.");
+    corpo.alvo = fat; corpo.alvo_faturamento = fat; corpo.alvo_vendas = vendas;
   } else {
-    DB.metas.push({
-      id: uid("mt"), tenant_id: tid, mes: mes, tipo: v("mt-tipo"), titulo: tit, alvo: alvo,
-      premio: v("mt-premio"), origem: doGrupo ? "grupo" : "empresa", autor: Sess.user_id, criado: today(), realizado_manual: 0
-    });
-    toast(doGrupo ? "Meta enviada para " + nomeEmpresa(tid) + "." : "Meta criada.", "ok");
+    if (!(alvo > 0)) return bad("Informe um objetivo maior que zero.");
+    corpo.alvo = alvo;
+    if (tipo === "unidades_produto") {
+      corpo.produto_id = v("mt-produto");
+      if (!corpo.produto_id) return bad("Selecione o produto da meta.");
+    }
+    if (tipo === "unidades_categoria") {
+      corpo.categoria = v("mt-categoria");
+      if (!corpo.categoria) return bad("Selecione a categoria da meta.");
+    }
   }
-  logar("Meta definida", tit + " · " + mesLabel(mes));
-  save(); fecharModal();
-  ir(View.pg, View.p);
+  var passo;
+  if (id) {
+    var atual = find(DB.metas, id) || {};
+    passo = Dados.alterar("metas", id, { dados: Object.assign({}, atual, corpo) }, atual.versao);
+  } else passo = Dados.criar("metas", { id: uid("mt"), dados: corpo });
+  passo.then(function (r) {
+    if (r.erro) return bad(r.erro);
+    if (r.conflito) return bad("Alguém alterou esta meta antes. Abra de novo.");
+    fecharModal(); toast(id ? "Meta atualizada." : "Meta criada.", "ok");
+    f15_repintar(["supervisao", "dashboard", "metas"]);
+  }).catch(function () { bad("Sem resposta do servidor."); });
 }
+
 function modalProgresso(id) {
   var m = find(DB.metas, id);
   modal("Atualizar progresso", '<div class="fld"><label>' + esc(m.titulo) + '</label><input id="mp-val" type="number" step="1" value="' + (m.realizado_manual || 0) + '">' +
@@ -4757,7 +4818,8 @@ function qtdPeriodo(ini, fim, tid) {
   return DB.sales.filter(function (s) { return s.tenant_id === tid && s.status !== "cancelada" && s.data >= ini && s.data <= fim; }).length;
 }
 function metaDoMes(mes, tid, tipo) {
-  var ms = metasDoMes(mes, tid).filter(function (m) { return m.tipo === (tipo || "faturamento"); });
+  var lista = metasDoMes(mes, tid);
+  var ms = tipo ? lista.filter(function (m) { return m.tipo === tipo; }) : lista;
   return ms.length ? ms[0] : null;
 }
 function metaTrimestre(t, tid) {
@@ -4985,42 +5047,44 @@ function dashAdmin() {
   var mes = mesRef(today()), ini = mIni(today()), fim = mFim(today());
   var m = metaDoMes(mes), c = corridaDoMes();
   var realizado = faturamentoPeriodo(ini, fim), qtd = qtdPeriodo(ini, fim);
-  var alvo = m ? m.alvo : 0;
+  var pmeta = m ? progressoMeta(m) : null;
   var mesAnt = faturamentoPeriodo(mIni(addM(today(), -1)), mFim(addM(today(), -1)));
-  if (alvo && realizado >= alvo) window.__celebrar = true;
-
+  if (pmeta && pmeta.atingida) window.__celebrar = true;
   var h = head("Como está o negócio hoje", mNome(today()) + " · " + org().nome,
     '<button class="btn" onclick="ir(\'financeiro\',{tab:\'metas\'})">' + ICON.crescimento + "Metas</button>" +
     '<button class="btn btn-p" onclick="modalVenda()">' + ICON.plus + "Registrar compra</button>");
+  var principalReal = m && m.tipo === "combinada" ? pmeta.realizado.faturamento : (pmeta ? pmeta.realizado : realizado);
+  var principalAlvo = m && m.tipo === "combinada" ? pmeta.alvo_faturamento : (pmeta ? pmeta.alvo : 0);
+  var principalFmt = m && m.tipo !== "faturamento" && m.tipo !== "recebimento" && m.tipo !== "combinada" ? pmeta.fmt(pmeta.realizado) : money(principalReal);
+  var alvoFmt = m && m.tipo !== "faturamento" && m.tipo !== "recebimento" && m.tipo !== "combinada" ? pmeta.fmt(pmeta.alvo) : money(principalAlvo);
   h += arenaMeta({
     eyebrow: "Meta do mês · " + mNome(today()),
-    titulo: m ? (realizado >= alvo ? "Meta batida" : "Faltam " + money(Math.max(0, alvo - realizado)) + " para bater a meta") : "Nenhuma meta definida para este mês",
-    sub: m ? (m.origem === "grupo" ? "Definida pelo grupo · " : "") + c.restantes + " dias até o fechamento · " + esc(m.titulo)
-      : "Defina a meta em Financeiro › Metas e acompanhe o progresso aqui",
-    realizado: realizado, alvo: alvo || realizado || 1, premio: m ? m.premio : "",
-    marcoPct: alvo ? c.idealHoje / alvo * 100 : null,
+    titulo: m ? (pmeta.atingida ? "Meta batida" : "Faltam " + (m.tipo === "combinada" ? money(pmeta.falta) : pmeta.fmt(pmeta.falta)) + " para bater a meta") : "Nenhuma meta definida para este mês",
+    sub: m ? (m.origem === "grupo" ? "Definida pelo grupo · " : "") + c.restantes + " dias até o fechamento · " + esc(m.titulo) : "Defina a meta no Gerenciador de Metas e acompanhe o progresso aqui",
+    realizado: principalReal, alvo: principalAlvo, pct: pmeta ? pmeta.pct : 0,
+    valorFmt: principalFmt, alvoFmt: alvoFmt, premio: m ? m.premio : "",
+    marcoPct: m && m.tipo === "faturamento" ? (c.idealHoje / (m.alvo || 1) * 100) : null,
     extras: [
       { k: "Vendido no mês", v: n0(qtd) + (qtd === 1 ? " venda" : " vendas") },
       { k: "Ticket médio", v: money(qtd ? realizado / qtd : 0) },
-      { k: "Falta por dia", v: alvo ? money(c.faltaDia) : "—" },
-      { k: "Ritmo", v: c.idealHoje ? (c.ritmo >= 0 ? "▲ " : "▼ ") + pc(Math.abs(c.ritmo)) : "—", cor: c.ritmo >= 0 ? "#5fd3a4" : "#ffb4ae" },
-      { k: "vs. mês passado", v: mesAnt ? (realizado >= mesAnt ? "▲ " : "▼ ") + pc(Math.abs((realizado - mesAnt) / mesAnt * 100)) : "—", cor: realizado >= mesAnt ? "#5fd3a4" : "#ffb4ae" }
+      { k: "Meta", v: m ? (TIPO_META[m.tipo] ? TIPO_META[m.tipo].nome : m.tipo) : "—" },
+      { k: "Falta", v: m ? (m.tipo === "combinada" ? money(pmeta.falta) : pmeta.fmt(pmeta.falta)) : "—" },
+      { k: "vs. mês passado", v: mesAnt ? (realizado >= mesAnt ? "▲ " : "▼ ") + pc(Math.abs((realizado - mesAnt) / mesAnt * 100)) : "—" }
     ]
   });
-  h += '<div class="grid c21" style="margin-bottom:20px">' + corridaBox(c) + atencaoBox() + "</div>";
+  h += '<div class="grid c21" style="margin-bottom:20px">' + (m && m.tipo !== "faturamento" ? atencaoBox() : corridaBox(c) + atencaoBox()) + "</div>";
   h += '<div class="grid c2" style="margin-bottom:20px">' + metasVivas(T()) + blocoTrimestre(T()) + "</div>";
   h += historicoMetas(T(), 6);
   return h;
 }
-
 function dashVendedor() {
   var u = me(), cf = cfg();
   var mes = mesRef(today()), ini = mIni(today()), fim = mFim(today());
   var vs = vendasPeriodo(ini, fim, u.id);
   var total = r2(sum(vs, function (s) { return s.total; }));
   var totalAnt = r2(sum(vendasPeriodo(mIni(addM(today(), -1)), mFim(addM(today(), -1)), u.id), function (s) { return s.total; }));
-  var m = metaDoMes(mes), alvo = m ? m.alvo : 0, c = corridaDoMes();
-  if (alvo && total >= alvo) window.__celebrar = true;
+  var m = metaDoMes(mes), alvo = m ? m.alvo : 0, c = corridaDoMes(), pmeta = m ? progressoMeta(m) : null;
+  if (pmeta && pmeta.atingida) window.__celebrar = true;
 
   var h = head("Bom trabalho, " + u.nome.split(" ")[0], mNome(today()) + " · " + org().nome,
     '<button class="btn btn-p" onclick="modalVenda()">' + ICON.plus + "Registrar compra</button>");
@@ -5028,7 +5092,7 @@ function dashVendedor() {
     eyebrow: "Meta do mês",
     titulo: alvo ? (total >= alvo ? "Meta batida" : "Faltam " + money(Math.max(0, alvo - total)) + " para bater a meta") : "Nenhuma meta definida",
     sub: c.restantes + " dias até o fechamento" + (m ? " · " + esc(m.titulo) : ""),
-    realizado: total, alvo: alvo || total || 1, premio: m ? m.premio : "",
+    realizado: m && m.tipo === "combinada" ? pmeta.realizado.faturamento : (pmeta ? pmeta.realizado : total), alvo: m && m.tipo === "combinada" ? pmeta.alvo_faturamento : (pmeta ? pmeta.alvo : 0), pct: pmeta ? pmeta.pct : 0, valorFmt: m && m.tipo !== "faturamento" && m.tipo !== "recebimento" && m.tipo !== "combinada" ? pmeta.fmt(pmeta.realizado) : money(m && m.tipo === "combinada" ? pmeta.realizado.faturamento : (pmeta ? pmeta.realizado : total)), alvoFmt: m && m.tipo !== "faturamento" && m.tipo !== "recebimento" && m.tipo !== "combinada" ? pmeta.fmt(pmeta.alvo) : money(m && m.tipo === "combinada" ? pmeta.alvo_faturamento : (pmeta ? pmeta.alvo : 0)), premio: m ? m.premio : "",
     marcoPct: alvo ? c.idealHoje / alvo * 100 : null,
     extras: [
       { k: "Minhas vendas", v: n0(vs.length) },
@@ -10245,7 +10309,19 @@ function painelCrediario() {
     return isNaN(n) ? 0 : n;
   }
 
-  window.salvarProduto = function (id) {
+  function produtoNomeDuplicado(nome, idAtual) {
+  var alvo = String(nome || "").trim().replace(/\s+/g, " ").toLowerCase();
+  if (!alvo) return null;
+  var lista = Q("products");
+  for (var i = 0; i < lista.length; i++) {
+    var p = lista[i];
+    if (idAtual && p.id === idAtual) continue;
+    var n = String(p.nome || p.dados && p.dados.nome || "").trim().replace(/\s+/g, " ").toLowerCase();
+    if (n === alvo && p.status !== "inativo") return p;
+  }
+  return null;
+}
+window.salvarProduto = function (id) {
     var nome = v("p-nome"), cat = v("p-cat"), preco = nvDinheiroProduto("p-preco"), custoValor = nvDinheiroProduto("p-custo"), estoqueDesejado = Math.max(0, Math.round(nv("p-est"))), err = el("p-err");
     function bad(m) { err.innerHTML = "<span>" + ICON.alert + "</span><div>" + esc(m) + "</div>"; err.classList.remove("hidden"); }
     if (nome.length < 2) return bad("Informe o nome do produto.");
@@ -12951,10 +13027,13 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     if (!tit || tit.length < 2) { return toast("Informe o titulo da meta.", "err"); }
     if (!(alvo > 0))            { return toast("Informe o alvo.", "err"); }
 
-    var corpo = {
-      titulo: tit, alvo: alvo, tipo: v("mt-tipo"), premio: v("mt-premio"),
+    var tipo = v("mt-tipo"), corpo = {
+      titulo: tit, alvo: alvo, tipo: tipo, premio: v("mt-premio"),
       mes: v("mt-mes"), autor: f15_eu(), realizado_manual: 0
     };
+    if (tipo === "combinada") { corpo.alvo_faturamento = nv("mt-fat"); corpo.alvo_vendas = Math.round(nv("mt-vendas")); corpo.alvo = corpo.alvo_faturamento; }
+    if (tipo === "unidades_produto") corpo.produto_id = v("mt-produto");
+    if (tipo === "unidades_categoria") corpo.categoria = v("mt-categoria");
 
     var passo;
     if (id) {
