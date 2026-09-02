@@ -1021,20 +1021,30 @@ var Dados = (function () {
        · dois eventos da mesma linha, fora de ordem
      Em todos, o de versão menor ou igual é descartado.
      ───────────────────────────────────────────────────────── */
+  /* Nem toda tabela pequena possui coluna `id`.
+     `estoque` e `products_custo` são uma linha por produto e usam
+     `product_id` como chave. Se cair no `undefined`, todos os produtos
+     ocupam a mesma posição da projeção e o último cadastrado apaga os
+     estoques anteriores na tela. */
+  function chaveRegistro(tabela, registro) {
+    if (!registro) return null;
+    return registro.id || (
+      (tabela === "estoque" || tabela === "products_custo")
+        ? registro.product_id
+        : null
+    );
+  }
+
   function aplicar(tabela, registro) {
     if (!registro) return false;
-    /* products_custo usa product_id como chave primária e não possui
-       necessariamente uma coluna `id`. Sem esta normalização, a consulta
-       retornava o custo do servidor, mas a projeção descartava todas as
-       linhas por não encontrar registro.id — e a tela mostrava R$ 0,00. */
-    var chave = registro.id || (tabela === "products_custo" ? registro.product_id : null);
+    var chave = chaveRegistro(tabela, registro);
     if (!chave) return false;
-    if (tabela === "products_custo" && !registro.id) registro.id = chave;
+    if (!registro.id) registro.id = chave;
     projecao[tabela] = projecao[tabela] || {};
     var atual = projecao[tabela][chave];
     if (atual && registro.versao != null && atual.versao != null
-        && registro.versao <= atual.versao) return false;   /* eco, ignora */
-    projecao[tabela][registro.id] = registro;
+        && registro.versao <= atual.versao) return false;
+    projecao[tabela][chave] = registro;
     return true;
   }
 
@@ -1127,7 +1137,13 @@ var Dados = (function () {
     return db().from(tabela).select("*").then(function (r) {
       if (r.error) return { erro: mensagem(r.error) };
       projecao[tabela] = {};
-      (r.data || []).forEach(function (l) { projecao[tabela][l.id] = l; });
+      (r.data || []).forEach(function (l) {
+        var chave = chaveRegistro(tabela, l);
+        if (chave) {
+          if (!l.id) l.id = chave;
+          projecao[tabela][chave] = l;
+        }
+      });
       avisar(tabela);
       return { linhas: r.data || [] };
     }).catch(function () { return { erro: "Sem conexão com o servidor." }; });
@@ -1414,13 +1430,16 @@ var TempoReal = (function () {
 
       if (evento.eventType === "DELETE") {
         var velho = evento.old || {};
-        if (!velho.id) return Dados.recarregar(tabela, "exclusão sem identificador");
-        if (Dados.remover(tabela, velho.id)) Dados.avisar(tabela);
+        var chaveVelho = chaveRegistro(tabela, velho);
+        if (!chaveVelho) return Dados.recarregar(tabela, "exclusão sem identificador");
+        if (Dados.remover(tabela, chaveVelho)) Dados.avisar(tabela);
         return;
       }
 
       var novo = evento.new;
-      if (!novo || !novo.id) return Dados.recarregar(tabela, "evento sem registro");
+      var chaveNovo = chaveRegistro(tabela, novo);
+      if (!novo || !chaveNovo) return Dados.recarregar(tabela, "evento sem registro");
+      if (!novo.id) novo.id = chaveNovo;
 
       /* aplicar() descarta versão menor ou igual: é isto que
          impede o registro de aparecer duas vezes quando o eco da
@@ -10283,7 +10302,11 @@ function painelCrediario() {
     var novo = !id;
     var pid = id || uid("p");
     var produtoAtual = id ? find(DB.products, id) : null;
-    var estoqueAtual = novo ? 0 : Math.max(0, Math.round(Number((produtoAtual || {}).estoque || 0)));
+    /* O saldo não fica em products. Ele fica na tabela estoque,
+       indexada por product_id. Nunca usar produtoAtual.estoque: esse
+       campo não é a fonte de verdade e pode ser inexistente/antigo. */
+    var estoqueRegistro = id ? Dados.um("estoque", id) : null;
+    var estoqueAtual = novo ? 0 : Math.max(0, Math.round(Number((estoqueRegistro || {}).saldo || 0)));
     var produto = { id: pid, nome: nome, cod: v("p-cod"), categoria: cat, fornecedor: v("p-forn"), preco: preco, status: "ativo" };
     var custo = { custo: custoValor, preco_atacado: nv("p-atacado") || null, fornecedor: v("p-forn") };
 
