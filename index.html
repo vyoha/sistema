@@ -3544,7 +3544,6 @@ function modalVenda(clienteId, itensIniciais) {
     '<div class="fld"><label>CPF <span class="rq">*</span></label><input id="nv-cpf" maxlength="14" placeholder="000.000.000-00" onblur="checarCpfVenda()"></div></div>' +
     '<div id="nv-alerta"></div>' +
     '<div class="rw rw3"><div class="fld"><label>Telefone <span class="rq">*</span></label><input id="nv-tel" placeholder="(00) 00000-0000"></div>' +
-    '<div class="fld"><label>Nascimento</label><input id="nv-nasc" type="date"></div>' +
     '<div class="fld"><label>E-mail</label><input id="nv-mail" type="email"></div></div>' +
     '<div class="rw rw3"><div class="fld"><label>Endereço</label><input id="nv-end" placeholder="Rua, número"></div>' +
     '<div class="fld"><label>Bairro</label><input id="nv-bairro"></div>' +
@@ -4040,7 +4039,6 @@ function modalCliente(id, depoisVenda) {
   var corpo = '<div class="rw rw2"><div class="fld"><label>Nome completo <span class="rq">*</span></label><input id="k-nome" value="' + esc(c ? c.nome : "") + '"></div>' +
     '<div class="fld"><label>CPF <span class="rq">*</span></label><input id="k-cpf" value="' + (c ? fcpf(c.cpf) : "") + '" maxlength="14"></div></div>' +
     '<div class="rw rw3"><div class="fld"><label>Telefone <span class="rq">*</span></label><input id="k-tel" value="' + (c ? c.tel : "") + '"></div>' +
-    '<div class="fld"><label>Nascimento</label><input id="k-nasc" type="date" value="' + (c ? c.nascimento : "") + '"></div>' +
     '<div class="fld"><label>E-mail</label><input id="k-mail" type="email" value="' + esc(c ? c.email : "") + '"></div></div>' +
     '<div class="rw rw3"><div class="fld"><label>Endereço</label><input id="k-end" value="' + esc(c ? c.endereco : "") + '"></div>' +
     '<div class="fld"><label>Bairro</label><input id="k-bairro" value="' + esc(c ? c.bairro : "") + '"></div>' +
@@ -4064,7 +4062,7 @@ function salvarCliente(id, depoisVenda) {
   if (tel.length < 10) return bad("Telefone inválido — inclua o DDD.");
   if (Q("customers").filter(function (c) { return dig(c.cpf) === cpf && c.id !== id; }).length) return bad("Já existe um cliente com este CPF nesta empresa.");
   var dados = {
-    nome: nome, cpf: cpf, tel: tel, email: v("k-mail"), nascimento: v("k-nasc"), endereco: v("k-end"),
+    nome: nome, cpf: cpf, tel: tel, email: v("k-mail"), endereco: v("k-end"),
     bairro: v("k-bairro"), cep: v("k-cep"), cidade: v("k-cid"), uf: v("k-uf").toUpperCase(),
     profissao: v("k-prof"), origem: v("k-org"), obs: v("k-obs")
   };
@@ -11176,7 +11174,7 @@ window.salvarProduto = function (id) {
           id: novoId,
           dados: {
             nome: nome, cpf: cpf, tel: tel, email: v("nv-mail"),
-            nascimento: v("nv-nasc"), endereco: v("nv-end"), bairro: v("nv-bairro"),
+            endereco: v("nv-end"), bairro: v("nv-bairro"),
             cep: v("nv-cep"), cidade: v("nv-cid"), uf: v("nv-uf").toUpperCase(),
             profissao: v("nv-prof"), origem: v("nv-org"), obs: ""
           }
@@ -14453,13 +14451,13 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 
    O formulario antigo do modal de venda pedia doze campos:
 
-     nome, cpf, telefone, nascimento, e-mail, endereco, bairro,
+     nome, cpf, telefone, e-mail, endereco, bairro,
      cep, cidade, uf, profissao, como chegou
 
    A Analise de Credito pergunta trinta, e sao esses trinta que
    decidem se a loja fia ou nao:
 
-     identificacao   nome, cpf, nascimento, dois telefones
+     identificacao   nome, cpf, dois telefones
      moradia         cep, endereco, bairro, cidade, uf,
                      dois pontos de referencia, se a casa e
                      propria, ha quanto tempo mora ali
@@ -14577,7 +14575,6 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
       '<div class="rw rw3">' +
         campo("nv-tel", "Telefone 1", 'placeholder="(00) 00000-0000"', 1) +
         campo("n26-fone2", "Telefone 2", 'placeholder="Outro caminho para achar"', 1) +
-        campo("nv-nasc", "Nascimento", 'type="date"', 1) +
       "</div>" +
       '<div class="rw rw2">' +
         campo("nv-mail", "E-mail", 'type="email"') +
@@ -14684,7 +14681,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
   /* ---------- o que falta ---------- */
   var OBRIGATORIOS = [
     ["nv-nome", "nome completo"], ["nv-cpf", "CPF"], ["nv-tel", "telefone 1"],
-    ["n26-fone2", "telefone 2"], ["nv-nasc", "data de nascimento"],
+    ["n26-fone2", "telefone 2"],
     ["nv-end", "endereço"], ["nv-bairro", "bairro"], ["nv-cid", "cidade"],
     ["n26-ref1", "ponto de referência 1"], ["n26-ref2", "ponto de referência 2"],
     ["n26-moradia", "se a casa é própria"], ["n26-tempo-casa", "há quanto tempo mora aí"],
@@ -15041,7 +15038,6 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
       '<div class="rw rw3">' +
         campo("k-tel", "Telefone 1", c.tel, "", 1) +
         campo("k27-fone2", "Telefone 2", cr.telefone2, "", 1) +
-        campo("k-nasc", "Nascimento", c.nascimento, 'type="date"', 1) +
       "</div>" +
       '<div class="rw rw2">' +
         campo("k-mail", "E-mail", c.email, 'type="email"') +
@@ -15149,7 +15145,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
   /* ---------- o que falta ---------- */
   var OBRIGATORIOS = [
     ["k-nome", "nome completo"], ["k-cpf", "CPF"], ["k-tel", "telefone 1"],
-    ["k27-fone2", "telefone 2"], ["k-nasc", "data de nascimento"],
+    ["k27-fone2", "telefone 2"],
     ["k-end", "endereço"], ["k-bairro", "bairro"], ["k-cid", "cidade"],
     ["k27-ref1", "ponto de referência 1"], ["k27-ref2", "ponto de referência 2"],
     ["k27-moradia", "se a casa é própria"], ["k27-tempo-casa", "há quanto tempo mora aí"],
