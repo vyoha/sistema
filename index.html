@@ -598,7 +598,7 @@ body.tour-on{overflow:hidden}
         <div class="sub" id="bar-s"></div>
       </div>
       <div class="bar-r">
-        <button class="sync mut" id="sync-chip" onclick="modalSync()" title="Sincronização"><span class="sync-p"></span>Sincronização</button>
+        <button class="sync mut" id="sync-chip" onclick="modalSync()" title="Sincronização"><span class="sync-p"></span>Só neste computador</button>
         <div class="gsearch">
           <span class="i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg></span>
           <input id="gq" placeholder="Buscar clientes, vendas ou produtos" autocomplete="off"
@@ -984,7 +984,7 @@ var Dados = (function () {
   var ouvintes = {};
 
   /* as tabelas pequenas cabem inteiras; as grandes vêm por janela */
-  var INTEIRAS = ["equipe", "config_empresa", "metas", "products", "products_custo", "estoque", "restricoes"];
+  var INTEIRAS = ["equipe", "config_empresa", "metas", "products", "estoque", "restricoes"];
   var POR_JANELA = ["customers", "sales", "parcels", "moves", "cash",
                     "cobrancas", "acordos", "leads_empresa", "analises", "logs"];
 
@@ -1021,30 +1021,13 @@ var Dados = (function () {
        · dois eventos da mesma linha, fora de ordem
      Em todos, o de versão menor ou igual é descartado.
      ───────────────────────────────────────────────────────── */
-  /* Nem toda tabela pequena possui coluna `id`.
-     `estoque` e `products_custo` são uma linha por produto e usam
-     `product_id` como chave. Se cair no `undefined`, todos os produtos
-     ocupam a mesma posição da projeção e o último cadastrado apaga os
-     estoques anteriores na tela. */
-  function chaveRegistro(tabela, registro) {
-    if (!registro) return null;
-    return registro.id || (
-      (tabela === "estoque" || tabela === "products_custo")
-        ? registro.product_id
-        : null
-    );
-  }
-
   function aplicar(tabela, registro) {
-    if (!registro) return false;
-    var chave = chaveRegistro(tabela, registro);
-    if (!chave) return false;
-    if (!registro.id) registro.id = chave;
+    if (!registro || !registro.id) return false;
     projecao[tabela] = projecao[tabela] || {};
-    var atual = projecao[tabela][chave];
+    var atual = projecao[tabela][registro.id];
     if (atual && registro.versao != null && atual.versao != null
-        && registro.versao <= atual.versao) return false;
-    projecao[tabela][chave] = registro;
+        && registro.versao <= atual.versao) return false;   /* eco, ignora */
+    projecao[tabela][registro.id] = registro;
     return true;
   }
 
@@ -1137,13 +1120,7 @@ var Dados = (function () {
     return db().from(tabela).select("*").then(function (r) {
       if (r.error) return { erro: mensagem(r.error) };
       projecao[tabela] = {};
-      (r.data || []).forEach(function (l) {
-        var chave = chaveRegistro(tabela, l);
-        if (chave) {
-          if (!l.id) l.id = chave;
-          projecao[tabela][chave] = l;
-        }
-      });
+      (r.data || []).forEach(function (l) { projecao[tabela][l.id] = l; });
       avisar(tabela);
       return { linhas: r.data || [] };
     }).catch(function () { return { erro: "Sem conexão com o servidor." }; });
@@ -1430,16 +1407,13 @@ var TempoReal = (function () {
 
       if (evento.eventType === "DELETE") {
         var velho = evento.old || {};
-        var chaveVelho = chaveRegistro(tabela, velho);
-        if (!chaveVelho) return Dados.recarregar(tabela, "exclusão sem identificador");
-        if (Dados.remover(tabela, chaveVelho)) Dados.avisar(tabela);
+        if (!velho.id) return Dados.recarregar(tabela, "exclusão sem identificador");
+        if (Dados.remover(tabela, velho.id)) Dados.avisar(tabela);
         return;
       }
 
       var novo = evento.new;
-      var chaveNovo = chaveRegistro(tabela, novo);
-      if (!novo || !chaveNovo) return Dados.recarregar(tabela, "evento sem registro");
-      if (!novo.id) novo.id = chaveNovo;
+      if (!novo || !novo.id) return Dados.recarregar(tabela, "evento sem registro");
 
       /* aplicar() descarta versão menor ou igual: é isto que
          impede o registro de aparecer duas vezes quando o eco da
@@ -1777,12 +1751,9 @@ var TIPO_META = {
   faturamento: { nome: "Faturamento", desc: "Valor vendido no mês", un: "R$" },
   recebimento: { nome: "Recebimento em caixa", desc: "Valor efetivamente recebido", un: "R$" },
   vendas: { nome: "Quantidade de vendas", desc: "Número de vendas fechadas", un: "vendas" },
-  personalizada: { nome: "Meta personalizada", desc: "Acompanhamento manual", un: "un" },
-  unidades_produto: { nome: "Unidades de produto", desc: "Quantidade de um produto vendido", un: "un" },
-  unidades_categoria: { nome: "Unidades de categoria", desc: "Quantidade vendida de uma categoria", un: "un" },
-  combinada: { nome: "Faturamento + quantidade", desc: "Acompanhe faturamento e quantidade juntos", un: "R$" }
+  personalizada: { nome: "Meta personalizada", desc: "Acompanhamento manual (ex.: cestas básicas)", un: "un" }
 };
-var CAT_SAIDA = ["Fornecedor / Mercadoria", "Aluguel", "Energia e água", "Internet e telefone", "Salários", "Comissões", "Marketing", "Impostos", "Manutenção", "Outros"];
+var CAT_SAIDA = ["Fornecedor / Mercadoria", "Aluguel", "Energia e água", "Internet e telefone", "Salários", "Comissões", "Marketing", "Impostos", "Mensalidade", "Outros"];
 var CAT_ENTRADA = ["Recebimento de venda", "Entrada de venda", "Aporte de sócio", "Outras receitas"];
 var STAT = {
   ativa: ["t-inf", "Ativa"], atrasada: ["t-neg", "Atrasada"], quitada: ["t-pos", "Quitada"], cancelada: ["t-mut", "Cancelada"],
@@ -1824,13 +1795,13 @@ function gerarFaturas(t) {
   if (!DB.faturas.filter(function (f) { return f.tenant_id === t.id && f.tipo === "licenca"; }).length && t.licenca.valor_licenca) {
     DB.faturas.push({
       id: uid("f"), tenant_id: t.id, tipo: "licenca", competencia: compIni,
-      descricao: "Licença vitalícia da plataforma",
+      descricao: "Implantação da plataforma",
       valor: t.licenca.valor_licenca, venc: t.licenca.inicio,
       status: t.licenca.pagamento_inicial ? "paga" : (dt(t.licenca.inicio) < dt(today()) ? "vencida" : "aberta"),
       pago_em: t.licenca.pagamento_inicial ? t.licenca.inicio : null, codigo: linhaDigitavel(), criado: t.licenca.inicio
     });
   }
-  /* taxa mensal de manutenção */
+  /* mensalidade */
   var comp = compIni, n = 0;
   while (comp <= limite && n < 48) {
     if (!DB.faturas.filter(function (f) { return f.tenant_id === t.id && f.tipo === "manutencao" && f.competencia === comp; }).length) {
@@ -1839,7 +1810,7 @@ function gerarFaturas(t) {
       var paga = comp > atual ? false : (comp === compIni ? !!t.licenca.pagamento_inicial : true);
       DB.faturas.push({
         id: uid("f"), tenant_id: t.id, tipo: "manutencao", competencia: comp,
-        descricao: "Taxa de manutenção mensal",
+        descricao: "Mensalidade mensal",
         valor: t.licenca.valor, venc: venc,
         status: paga ? "paga" : (dt(venc) < dt(today()) ? "vencida" : "aberta"),
         pago_em: paga ? venc : null, codigo: linhaDigitavel(), criado: comp + "-01"
@@ -2274,39 +2245,18 @@ function metasDoMes(mes, tid) {
   return DB.metas.filter(function (m) { return m.tenant_id === tid && m.mes === mes; });
 }
 function progressoMeta(m) {
-  var ini = m.mes + "-01", fim = mFim(ini), realizado = 0, alvo = Number(m.alvo || 0);
+  var ini = m.mes + "-01", fim = mFim(ini), realizado = 0;
   var vs = DB.sales.filter(function (s) { return s.tenant_id === m.tenant_id && s.status !== "cancelada" && s.data >= ini && s.data <= fim; });
   if (m.tipo === "faturamento") realizado = r2(sum(vs, function (s) { return s.total; }));
   else if (m.tipo === "vendas") realizado = vs.length;
   else if (m.tipo === "recebimento") realizado = r2(sum(DB.cash.filter(function (x) { return x.tenant_id === m.tenant_id && x.tipo === "entrada" && x.data >= ini && x.data <= fim; }), function (x) { return x.valor; }));
-  else if (m.tipo === "unidades_produto") {
-    realizado = sum(vs, function (s) { return sum((s.itens || []).filter(function (i) { return i.product_id === m.produto_id; }), function (i) { return Number(i.qtd || 0); }); });
-  } else if (m.tipo === "unidades_categoria") {
-    realizado = sum(vs, function (s) { return sum((s.itens || []).filter(function (i) {
-      var p = find(DB.products, i.product_id) || {};
-      return String(p.categoria || "").trim().toLowerCase() === String(m.categoria || "").trim().toLowerCase();
-    }), function (i) { return Number(i.qtd || 0); }); });
-  } else if (m.tipo === "combinada") {
-    var fat = r2(sum(vs, function (s) { return s.total; }));
-    var qtd = vs.length;
-    realizado = { faturamento: fat, quantidade: qtd };
-  } else realizado = Number(m.realizado_manual || 0);
-
-  var pct;
-  if (m.tipo === "combinada") {
-    var pf = Number(m.alvo_faturamento || 0) > 0 ? realizado.faturamento / Number(m.alvo_faturamento) * 100 : 100;
-    var pq = Number(m.alvo_vendas || 0) > 0 ? realizado.quantidade / Number(m.alvo_vendas) * 100 : 100;
-    pct = Math.min(pf, pq);
-  } else pct = alvo > 0 ? realizado / alvo * 100 : 0;
-
+  else realizado = Number(m.realizado_manual || 0);
+  var pct = m.alvo > 0 ? realizado / m.alvo * 100 : 0;
   var un = TIPO_META[m.tipo] ? TIPO_META[m.tipo].un : "un";
   return {
-    realizado: realizado, pct: pct, alvo: alvo, un: un,
-    fmt: function (x) {
-      if (m.tipo === "combinada") return money(x);
-      return un === "R$" ? money(x) : n0(x) + (un === "vendas" ? "" : " " + un);
-    },
-    falta: m.tipo === "combinada" ? Math.max(0, r2(Number(m.alvo_faturamento || 0) - realizado.faturamento)) : Math.max(0, r2(alvo - realizado)),
+    realizado: realizado, pct: pct, alvo: m.alvo, un: un,
+    fmt: function (x) { return un === "R$" ? money(x) : n0(x) + (un === "vendas" ? "" : " " + un); },
+    falta: Math.max(0, r2(m.alvo - realizado)),
     encerrado: fim < today(), atingida: pct >= 100
   };
 }
@@ -2737,7 +2687,7 @@ function validarToken() {
       hint.style.color = "var(--alert)";
     } else { hint.textContent = "Formato: VY seguido de 8 caracteres."; hint.style.color = ""; }
     var c = DB.config.filter(function (x) { return x.tenant_id === t.id; })[0] || { logo: null, sigla: ini2(t.nome) };
-    var plano = t.licenca ? "licença ativa" : "ambiente";
+    var plano = t.licenca ? "implantação ativa" : "ambiente";
     el("org-card").innerHTML = logoHTML({ logo: c.logo, sigla: t.id === "vyoha" ? "VY" : c.sigla, nome: t.nome }, 44, 13) +
       "<div><b>" + esc(t.nome) + "</b><span>" + esc(t.slug) + ".vyoha.com.br · " + esc(plano) + "</span></div>" +
       '<button type="button" class="sw" onclick="trocarToken()">trocar</button>';
@@ -2897,11 +2847,9 @@ function iniciarApp() {
   aplicarMarca(); montarMenu(); montarUsuario(); montarSuporte(); avisoSuporteVyoha();
   ir(telaGuardada() || (isVend() ? "pdv" : "dashboard"), telaGuardadaP());
   pulso();
-  /* A sincronização real é Supabase + TempoReal. Não existe fila local
-     nem segundo sincronizador rodando em paralelo. */
-  try { TempoReal.vigiarAutorizacao(); } catch (e) {}
-  try { TempoReal.ligarAtencaoDaJanela(); } catch (e) {}
-  try { pintarSync(); } catch (e) {}
+  contarFila(); pintarSync();
+  if (nuvemSessao()) religarNuvem(function () {});
+  lacoSync();
   tourDeBoasVindas();
 }
 /* onde a pessoa estava antes de recarregar — só vale se ela ainda
@@ -3015,7 +2963,7 @@ function togglePop(e) {
   p.innerHTML = '<div class="pop-h">' + esc(org().nome) + "</div>" +
     '<div class="pop-i" onclick="modalPerfil()">' + ic("user") + "Meu perfil</div>" +
     (isAdmin() ? '<div class="pop-i" onclick="ir(\'config\')">' + ic("config") + "Configurações</div>" +
-      '<div class="pop-i" onclick="ir(\'assinatura\')">' + ic("fatura") + "Licença e manutenção</div>" : "") +
+      '<div class="pop-i" onclick="ir(\'assinatura\')">' + ic("fatura") + "Implantação e mensalidade</div>" : "") +
     (tourDaTela(View.pg) ? '<div class="pop-i" onclick="abrirTour(\'' + View.pg + '\')">' + ic("tour") + "Tour desta tela</div>" : "") +
     '<div class="pop-i" onclick="abrirTour(\'inicio\')">' + ic("tour") + "Tour de boas-vindas</div>" +
     '<div class="pop-i" onclick="abrirSuporte()">' + ic("suporte") + "Falar com o suporte</div>" +
@@ -3041,7 +2989,7 @@ var TITULOS = {
   rede_ranking: ["Ranking", "Classificação das empresas do grupo"],
   rede_financeiro: ["Financeiro", "Receita, despesa e lucro consolidados"],
   rede_alertas: ["Alertas", "Sinais que exigem atenção da rede"],
-  assinatura: ["Licença e manutenção", "Licença vitalícia e taxa mensal"]
+  assinatura: ["Implantação e mensalidade", "Implantação e mensalidade"]
 };
 var K_TELA = "vyoha_tela";
 function ir(pg, p) {
@@ -3284,17 +3232,7 @@ function quickSearch(t) {
 /* =======================================================================
    DASHBOARD
    ======================================================================= */
-var UI = { per: "mes", vBusca: "", vSt: "", lStatus: "", nTab: "cobranca", cBusca: "", cFiltro: "", pBusca: "", pCat: "", pDisp: "", pArq: false, fTab: "geral", rTab: "comercial", cfgTab: "empresa" };
-var _debBuscaProdutos = null;
-function deb() {
-  clearTimeout(_debBuscaProdutos);
-  _debBuscaProdutos = setTimeout(function () {
-    ir("produtos");
-    var e = el("f-p");
-    if (e) { e.focus(); try { e.selectionStart = e.value.length; e.selectionEnd = e.value.length; } catch (x) {} }
-  }, 180);
-}
-
+var UI = { per: "mes", vBusca: "", vSt: "", lStatus: "", nTab: "cobranca", cBusca: "", cFiltro: "", pBusca: "", pCat: "", pDisp: false, pArq: false, fTab: "geral", rTab: "comercial", cfgTab: "empresa" };
 function periodo() {
   var t = today();
   if (UI.per === "tudo") return ["1900-01-01", t, "desde o início", "1900-01-01", "1900-01-01"];
@@ -3524,7 +3462,7 @@ function modalVenda(clienteId, itensIniciais) {
   draft = {
     modo: clienteId ? "existente" : (cls.length ? "existente" : "novo"), customer_id: clienteId || "", seller_id: me().id,
     itens: itensIniciais ? itensIniciais.slice() : [], desconto: 0, entrada: 0, parcelas: 12,
-    venc: addM(today(), 1), forma: "Entrada + crediário", obs: ""
+    data: today(), venc: addM(today(), 1), forma: "Entrada + crediário", obs: ""
   };
   if (itensIniciais && itensIniciais.length && !clienteId) draft.modo = "novo";
   var users = DB.users.filter(function (u) { return u.tenant_id === T() && u.status === "ativo"; });
@@ -3544,6 +3482,7 @@ function modalVenda(clienteId, itensIniciais) {
     '<div class="fld"><label>CPF <span class="rq">*</span></label><input id="nv-cpf" maxlength="14" placeholder="000.000.000-00" onblur="checarCpfVenda()"></div></div>' +
     '<div id="nv-alerta"></div>' +
     '<div class="rw rw3"><div class="fld"><label>Telefone <span class="rq">*</span></label><input id="nv-tel" placeholder="(00) 00000-0000"></div>' +
+    '<div class="fld"><label>Nascimento</label><input id="nv-nasc" type="date"></div>' +
     '<div class="fld"><label>E-mail</label><input id="nv-mail" type="email"></div></div>' +
     '<div class="rw rw3"><div class="fld"><label>Endereço</label><input id="nv-end" placeholder="Rua, número"></div>' +
     '<div class="fld"><label>Bairro</label><input id="nv-bairro"></div>' +
@@ -3565,12 +3504,13 @@ function modalVenda(clienteId, itensIniciais) {
     '<div style="border-top:1px solid var(--line-2);margin:18px 0"></div>' +
     '<div class="lg-eyebrow">3 · Pagamento</div>' +
     '<div class="rw rw4">' +
+    '<div class="fld"><label>Data da venda <span class="rq">*</span></label><input id="d-data" type="date" value="' + draft.data + '" oninput="calc()"></div>' +
     '<div class="fld"><label>Desconto (R$)</label><input id="d-desc" type="number" step="0.01" value="0" oninput="calc()"></div>' +
     '<div class="fld"><label>Entrada (R$)</label><input id="d-ent" type="number" step="0.01" value="0" oninput="calc()"></div>' +
     '<div class="fld"><label>Parcelas</label><select id="d-parc" onchange="calc()">' + [1, 3, 6, 10, 12, 15, 18, 24, 30, 36].map(function (n) { return '<option value="' + n + '"' + (n === 12 ? " selected" : "") + ">" + n + "x</option>"; }).join("") + "</select></div>" +
     '<div class="fld"><label>1º vencimento</label><input id="d-venc" type="date" value="' + draft.venc + '" oninput="calc()"></div></div>' +
     '<div class="rw rw3"><div class="fld"><label>Forma de pagamento</label><select id="d-forma" onchange="calc()">' +
-    ["Entrada + crediário", "Crediário"].map(function (f) { return "<option>" + f + "</option>"; }).join("") + "</select></div>" +
+    ["Entrada + crediário", "Crediário próprio", "À vista — Pix", "À vista — dinheiro", "Cartão de crédito"].map(function (f) { return "<option>" + f + "</option>"; }).join("") + "</select></div>" +
     '<div class="fld"><label>Responsável</label><select id="d-sel" ' + (isVend() ? "disabled" : "") + ' onchange="draft.seller_id=this.value">' +
     users.map(function (u) { return '<option value="' + u.id + '"' + (u.id === me().id ? " selected" : "") + ">" + esc(u.nome) + "</option>"; }).join("") + "</select></div>" +
     '<div class="fld"><label>Observação</label><input id="d-obs" placeholder="Opcional"></div></div>' +
@@ -3620,13 +3560,14 @@ function addItem() {
 function delItem(i) { draft.itens.splice(i, 1); calc(); }
 function calc() {
   if (!draft) return;
+  draft.data = v("d-data") || draft.data || today();
   draft.desconto = nv("d-desc"); draft.entrada = nv("d-ent");
   draft.parcelas = parseInt(v("d-parc") || "12", 10);
   draft.venc = v("d-venc") || draft.venc || addM(today(), 1);
   draft.forma = v("d-forma") || draft.forma; draft.obs = v("d-obs");
   var bruto = r2(sum(draft.itens, function (i) { return i.preco * i.qtd; }));
   var total = r2(bruto - draft.desconto), saldo = r2(Math.max(0, total - draft.entrada));
-  var avista = false;
+  var avista = draft.forma.indexOf("vista") >= 0 || draft.forma.indexOf("Cartão") >= 0;
   var np = avista ? 0 : draft.parcelas, vp = np ? r2(saldo / np) : 0;
   el("d-itens").innerHTML = draft.itens.length ? '<div class="tw" style="border:1px solid var(--line);border-radius:13px"><table><tbody>' +
     draft.itens.map(function (i, ix) {
@@ -3665,6 +3606,7 @@ function fecharVenda() {
       logar("Cliente cadastrado na venda", novoCli.nome);
     }
   }
+  if (!draft.data) return bad("Informe a data da venda.");
   if (!draft.customer_id) return bad("Selecione o cliente ou cadastre um novo.");
   if (!draft.itens.length) return bad("Adicione pelo menos um produto.");
   var bruto = r2(sum(draft.itens, function (i) { return i.preco * i.qtd; }));
@@ -3675,7 +3617,7 @@ function fecharVenda() {
     var p = find(DB.products, draft.itens[i].product_id);
     if (draft.itens[i].qtd > p.estoque) return bad("Estoque insuficiente de " + p.nome + ".");
   }
-  var avista = false;
+  var avista = draft.forma.indexOf("vista") >= 0 || draft.forma.indexOf("Cartão") >= 0;
   if (!avista && bloqueado(draft.customer_id)) {
     var cbl = find(DB.customers, draft.customer_id);
     return bad("<b>" + esc(cbl.nome) + "</b> está na blacklist da empresa — crédito bloqueado" +
@@ -3690,15 +3632,15 @@ function fecharVenda() {
     customer_id: draft.customer_id, seller_id: draft.seller_id, itens: draft.itens.slice(),
     bruto: bruto, desconto: draft.desconto, total: total, custo: r2(sum(draft.itens, function (i) { return i.custo * i.qtd; })),
     entrada: draft.entrada, parcelas: np, valor_parcela: vp, forma: draft.forma, obs: draft.obs,
-    status: "ativa", data: today(), hist: [{ d: new Date().toISOString(), t: "Venda registrada por " + me().nome }]
+    status: "ativa", data: draft.data, hist: [{ d: new Date().toISOString(), t: "Venda registrada por " + me().nome }]
   };
   DB.sales.push(venda);
   draft.itens.forEach(function (i) {
     var p2 = find(DB.products, i.product_id);
     p2.estoque -= i.qtd;
-    DB.moves.push({ id: uid("m"), tenant_id: T(), product_id: p2.id, tipo: "venda", qtd: i.qtd, motivo: "Venda #" + numero, user_id: me().id, data: new Date().toISOString() });
+    DB.moves.push({ id: uid("m"), tenant_id: T(), product_id: p2.id, tipo: "venda", qtd: i.qtd, motivo: "Venda #" + numero, user_id: me().id, data: draft.data });
   });
-  if (draft.entrada > 0) DB.cash.push({ id: uid("k"), tenant_id: T(), tipo: "entrada", categoria: "Entrada de venda", descricao: "Entrada da venda #" + numero, valor: draft.entrada, data: today(), origem: "venda", ref: venda.id, user_id: me().id });
+  if (draft.entrada > 0) DB.cash.push({ id: uid("k"), tenant_id: T(), tipo: "entrada", categoria: "Entrada de venda", descricao: "Entrada da venda #" + numero, valor: draft.entrada, data: draft.data, origem: "venda", ref: venda.id, user_id: me().id });
   var acc = 0;
   for (var n = 1; n <= np; n++) {
     var val = n === np ? r2(saldo - acc) : vp; acc = r2(acc + val);
@@ -4039,6 +3981,7 @@ function modalCliente(id, depoisVenda) {
   var corpo = '<div class="rw rw2"><div class="fld"><label>Nome completo <span class="rq">*</span></label><input id="k-nome" value="' + esc(c ? c.nome : "") + '"></div>' +
     '<div class="fld"><label>CPF <span class="rq">*</span></label><input id="k-cpf" value="' + (c ? fcpf(c.cpf) : "") + '" maxlength="14"></div></div>' +
     '<div class="rw rw3"><div class="fld"><label>Telefone <span class="rq">*</span></label><input id="k-tel" value="' + (c ? c.tel : "") + '"></div>' +
+    '<div class="fld"><label>Nascimento</label><input id="k-nasc" type="date" value="' + (c ? c.nascimento : "") + '"></div>' +
     '<div class="fld"><label>E-mail</label><input id="k-mail" type="email" value="' + esc(c ? c.email : "") + '"></div></div>' +
     '<div class="rw rw3"><div class="fld"><label>Endereço</label><input id="k-end" value="' + esc(c ? c.endereco : "") + '"></div>' +
     '<div class="fld"><label>Bairro</label><input id="k-bairro" value="' + esc(c ? c.bairro : "") + '"></div>' +
@@ -4062,7 +4005,7 @@ function salvarCliente(id, depoisVenda) {
   if (tel.length < 10) return bad("Telefone inválido — inclua o DDD.");
   if (Q("customers").filter(function (c) { return dig(c.cpf) === cpf && c.id !== id; }).length) return bad("Já existe um cliente com este CPF nesta empresa.");
   var dados = {
-    nome: nome, cpf: cpf, tel: tel, email: v("k-mail"), endereco: v("k-end"),
+    nome: nome, cpf: cpf, tel: tel, email: v("k-mail"), nascimento: v("k-nasc"), endereco: v("k-end"),
     bairro: v("k-bairro"), cep: v("k-cep"), cidade: v("k-cid"), uf: v("k-uf").toUpperCase(),
     profissao: v("k-prof"), origem: v("k-org"), obs: v("k-obs")
   };
@@ -4127,8 +4070,7 @@ function pg_produtos() {
   var l = (UI.pArq ? arquivados : ativos).slice(), c = cfg();
   if (UI.pBusca) l = l.filter(function (p) { return (p.nome + " " + p.cod + " " + p.categoria).toLowerCase().indexOf(UI.pBusca.toLowerCase()) >= 0; });
   if (UI.pCat) l = l.filter(function (p) { return p.categoria === UI.pCat; });
-  if (UI.pDisp === "disponivel") l = l.filter(function (p) { return p.estoque > 0; });
-  if (UI.pDisp === "indisponivel") l = l.filter(function (p) { return p.estoque <= 0; });
+  if (UI.pDisp) l = l.filter(function (p) { return p.estoque > 0; });
   l = srt(l, function (p) { return p.nome; });
   var cats = Object.keys(grp(ativos, function (p) { return p.categoria; })).sort();
   var falta = ativos.filter(precisaRepor);
@@ -4137,13 +4079,22 @@ function pg_produtos() {
   var h = head("Produtos", "O que está disponível para vender agora, quanto tem e o que mais sai",
     (isAdmin() ? '<button class="btn btn-p" onclick="modalProduto()">' + ICON.plus + "Novo produto</button>" +
       '<button class="btn" onclick="modalEstoque()">' + ICON.box + "Entrada de estoque</button>" : ""));
+  h += '<div class="grid c4" style="margin-bottom:20px">' +
+    metric("Itens disponíveis", n0(sum(ativos, function (p) { return p.estoque; })), ativos.length + " produtos cadastrados") +
+    /* o vendedor não enxerga custo: o que ele precisa é o que vai vender */
+    (isAdmin()
+      ? metric("Valor em estoque", money(sum(ativos, function (p) { return p.estoque * p.custo; })), "a preço de custo")
+      : metric("Valor do catálogo", money(sum(ativos, function (p) { return p.estoque * p.preco; })), "a preço de venda")) +
+    metric("Precisam de reposição", n0(falta.length), falta.length ? "no estoque mínimo ou abaixo" : "estoque saudável", falta.length ? "neg" : "pos") +
+    metric("Mais vendido (90 dias)", top && top.q ? esc(top.p.nome.split(" ").slice(0, 2).join(" ")) : "—", top && top.q ? top.q + " unidades" : "sem saídas") +
+    "</div>";
   if (falta.length) h += nota("<b>Reposição:</b> " + esc(falta.slice(0, 4).map(function (p) { return p.nome + " (" + p.estoque + ")"; }).join(" · ")) + (falta.length > 4 ? " e mais " + (falta.length - 4) : ""), "wr");
 
   h += '<div class="filters">' +
     '<div class="srch"><span class="i">' + ICON.search + '</span><input id="f-p" placeholder="Produto, código ou categoria" value="' + esc(UI.pBusca) + '" oninput="UI.pBusca=this.value;deb()"></div>' +
     '<select onchange="UI.pCat=this.value;ir(\'produtos\')" style="height:38px;border:1px solid var(--line);border-radius:10px;padding:0 10px"><option value="">Todas as categorias</option>' +
     cats.map(function (x) { return "<option" + (UI.pCat === x ? " selected" : "") + ">" + esc(x) + "</option>"; }).join("") + "</select>" +
-    '<select onchange="UI.pDisp=this.value;ir(\'produtos\')" style="height:38px;border:1px solid var(--line);border-radius:10px;padding:0 10px"><option value="">Todos os estoques</option><option value="disponivel"' + (UI.pDisp === "disponivel" ? " selected" : "") + '>Disponíveis</option><option value="indisponivel"' + (UI.pDisp === "indisponivel" ? " selected" : "") + '>Indisponíveis</option></select>' +
+    '<label class="opt" style="margin:0;height:38px"><input type="checkbox" ' + (UI.pDisp ? "checked" : "") + ' onchange="UI.pDisp=this.checked;ir(\'produtos\')"><span>Somente disponíveis</span></label>' +
     (arquivados.length ? '<label class="opt" style="margin:0;height:38px"><input type="checkbox" ' + (UI.pArq ? "checked" : "") +
       ' onchange="UI.pArq=this.checked;ir(\'produtos\')"><span>Ver arquivados (' + arquivados.length + ")</span></label>" : "") +
     '<div style="margin-left:auto" class="sm mut">' + l.length + " produtos listados</div></div>";
@@ -4236,18 +4187,89 @@ function modalProduto(id) {
   var corpo = '<div class="rw rw2"><div class="fld"><label>Nome do produto <span class="rq">*</span></label><input id="p-nome" value="' + esc(p ? p.nome : "") + '"></div>' +
     '<div class="fld"><label>Código</label><input id="p-cod" value="' + esc(p ? p.cod : "SKU" + (1000 + Math.floor(Math.random() * 9000))) + '"></div></div>' +
     '<div class="rw rw2"><div class="fld"><label>Categoria <span class="rq">*</span></label><input id="p-cat" list="cats" value="' + esc(p ? p.categoria : "") + '">' +
-    '<datalist id="cats">' + cats.map(function (x) { return "<option>" + esc(x) + "</option>"; }).join("") + '</datalist></div>' +
+    '<datalist id="cats">' + cats.map(function (x) { return "<option>" + esc(x) + "</option>"; }).join("") + "</datalist></div>" +
     '<div class="fld"><label>Fornecedor</label><input id="p-forn" value="' + esc(p ? p.fornecedor : "") + '"></div></div>' +
-    '<div class="rw rw3"><div class="fld"><label>Custo (R$)</label><input id="p-custo" type="text" inputmode="decimal" autocomplete="off" value="' + (p && p.custo != null ? String(p.custo) : "") + '"></div>' +
-    '<div class="fld"><label>Preço (R$) <span class="rq">*</span></label><input id="p-preco" type="text" inputmode="decimal" autocomplete="off" value="' + (p ? String(p.preco || "") : "") + '"></div>' +
-    '<div class="fld"><label>Estoque</label><input id="p-est" type="number" step="1" min="0" value="' + (p ? Math.max(0, Math.round(Number(p.estoque || 0))) : 0) + '"></div></div>' +
+    '<div class="rw rw4"><div class="fld"><label>Custo (R$)</label><input id="p-custo" type="number" step="0.01" value="' + (p ? p.custo : "") + '"></div>' +
+    '<div class="fld"><label>Preço (R$) <span class="rq">*</span></label><input id="p-preco" type="number" step="0.01" value="' + (p ? p.preco : "") + '"></div>' +
+    '<div class="fld"><label>Estoque ' + (p ? "(via movimentação)" : "inicial") + '</label><input id="p-est" type="number" ' + (p ? "disabled" : "") + ' value="' + (p ? p.estoque : 0) + '"></div>' +
+    /* em branco = "usa o padrão da empresa", 0 = "não me avise".
+       Por isso o valor só aparece preenchido quando alguém
+       definiu — o placeholder mostra qual é o padrão sem fingir
+       que ele foi escolhido para este produto. */
+    '<div class="fld"><label>Estoque mínimo</label><input id="p-min" type="number" min="0" placeholder="padrão: ' +
+    (Number(cfg().estoque_min || 3)) + '" value="' + (p && p.min != null ? p.min : "") +
+    '"><div class="sm mut" style="margin-top:4px">Em branco usa o padrão da empresa. Zero desliga o aviso de reposição deste produto.</div></div></div>' +
     '<div id="p-err" class="note ng hidden"></div>';
   modal(p ? "Editar produto" : "Novo produto", corpo,
     (p && isAdmin() ? '<button class="btn btn-d" style="margin-right:auto" onclick="removerProduto(\'' + p.id + '\')">' + ICON.trash + "Excluir</button>" : "") +
     '<button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn btn-p" onclick="salvarProduto(' + (p ? "'" + p.id + "'" : "null") + ')">Salvar</button>', true);
 }
-/* O salvamento oficial é definido no Bloco 2 acima, com servidor como autoridade.
-   Esta função legada não pode sobrescrevê-lo. */
+function salvarProduto(id) {
+  var nome = v("p-nome"), cat = v("p-cat"), preco = nv("p-preco"), err = el("p-err");
+  function bad(m) { err.innerHTML = "<span style='width:17px'>" + ICON.alert + "</span><div>" + m + "</div>"; err.classList.remove("hidden"); }
+  if (nome.length < 2) return bad("Informe o nome do produto.");
+  if (!cat) return bad("Informe a categoria.");
+  if (preco <= 0) return bad("O preço de venda deve ser maior que zero.");
+  if (id) {
+    var p = find(DB.products, id);
+    p.nome = nome; p.cod = v("p-cod"); p.categoria = cat; p.fornecedor = v("p-forn");
+    p.custo = nv("p-custo"); p.preco = preco; p.min = nv("p-min") || 3;
+    logar("Produto alterado", nome); toast("Produto atualizado.", "ok");
+  } else {
+    var novo = {
+      id: uid("p"), tenant_id: T(), cod: v("p-cod"), nome: nome, categoria: cat, fornecedor: v("p-forn"),
+      custo: nv("p-custo"), preco: preco, estoque: Math.max(0, Math.round(nv("p-est"))), min: nv("p-min") || 3, status: "ativo", criado: today()
+    };
+    DB.products.push(novo);
+    if (novo.estoque > 0) DB.moves.push({ id: uid("m"), tenant_id: T(), product_id: novo.id, tipo: "entrada", qtd: novo.estoque, motivo: "Estoque inicial", user_id: Sess.user_id, data: new Date().toISOString() });
+    logar("Produto cadastrado", nome); toast("Produto cadastrado.", "ok");
+  }
+  save(); fecharModal(); if (DW) recarregarDrawer(); else ir("produtos");
+}
+/* ---------- tirar um produto do catálogo ----------
+   Se ele nunca foi vendido, sai de vez. Se já entrou em alguma venda, é
+   arquivado: apagar reescreveria o histórico de vendas e o financeiro. */
+function produtoVendido(id) {
+  return Q("sales").some(function (s) {
+    return (s.itens || []).some(function (i) { return i.product_id === id; });
+  });
+}
+function removerProduto(id) {
+  var p = find(DB.products, id);
+  if (!p || p.tenant_id !== T() || !isAdmin()) return;
+  if (produtoVendido(id)) {
+    return confirmar("Arquivar " + esc(p.nome) + "?",
+      "Este produto já entrou em venda, então ele não pode ser apagado sem reescrever o histórico. " +
+      "Arquivando, ele sai do catálogo e do PDV na hora e as vendas antigas continuam corretas. Dá para reativar depois.",
+      function () { arquivarProduto(id); }, "Arquivar", true);
+  }
+  confirmar("Excluir " + esc(p.nome) + "?",
+    "O produto nunca foi vendido, então ele sai do sistema junto com as movimentações de estoque dele. Não dá para desfazer.",
+    function () { apagarProduto(id); }, "Excluir", true);
+}
+function apagarProduto(id) {
+  var p = find(DB.products, id);
+  if (!p || p.tenant_id !== T() || !isAdmin()) return;
+  if (produtoVendido(id)) return arquivarProduto(id);
+  DB.moves = DB.moves.filter(function (m) { return m.product_id !== id; });
+  DB.products = DB.products.filter(function (x) { return x.id !== id; });
+  logar("Produto excluído", p.nome);
+  save(); fecharModal(); fecharDrawer(); toast("Produto excluído.", "ok"); ir("produtos");
+}
+function arquivarProduto(id) {
+  var p = find(DB.products, id);
+  if (!p || p.tenant_id !== T() || !isAdmin()) return;
+  p.status = "inativo"; p.arquivado = new Date().toISOString();
+  logar("Produto arquivado", p.nome);
+  save(); fecharModal(); fecharDrawer(); toast("Produto arquivado — some do catálogo e do PDV.", "ok"); ir("produtos");
+}
+function reativarProduto(id) {
+  var p = find(DB.products, id);
+  if (!p || p.tenant_id !== T() || !isAdmin()) return;
+  p.status = "ativo"; delete p.arquivado;
+  logar("Produto reativado", p.nome);
+  save(); fecharModal(); fecharDrawer(); toast("Produto de volta ao catálogo.", "ok"); ir("produtos");
+}
 function modalEstoque(pid) {
   var prods = srt(Q("products").filter(function (p) { return p.status !== "inativo"; }), function (p) { return p.nome; });
   var corpo = '<div class="fld"><label>Produto</label><select id="e-prod">' + prods.map(function (p) {
@@ -4347,13 +4369,12 @@ function pg_financeiro(p) {
     h += '<div class="grid c4" style="margin-bottom:20px">' +
       metric("Metas do mês", n0(lista.length), doGrupo.length ? n0(doGrupo.length) + " definidas pelo grupo" : "definidas pela empresa") +
       metric("Metas batidas", n0(batidas), lista.length ? pc(batidas / lista.length * 100) + " do total" : "nenhuma meta definida", batidas ? "pos" : "") +
-      metric("Objetivo principal", (function () {
-        var f = lista[0];
-        if (!f) return "—";
-        return f.tipo === "combinada" ? money(f.alvo_faturamento || f.alvo) : (TIPO_META[f.tipo] && TIPO_META[f.tipo].un === "R$" ? money(f.alvo) : n0(f.alvo));
+      metric("Meta de faturamento", (function () {
+        var f = lista.filter(function (m) { return m.tipo === "faturamento"; })[0];
+        return f ? money(f.alvo) : "—";
       })(), (function () {
-        var f = lista[0];
-        return f ? (TIPO_META[f.tipo] ? TIPO_META[f.tipo].nome : f.tipo) + " · " + pc(progressoMeta(f).pct) : "nenhuma meta definida";
+        var f = lista.filter(function (m) { return m.tipo === "faturamento"; })[0];
+        return f ? pc(progressoMeta(f).pct) + " atingido" : "sem meta de faturamento";
       })()) +
       metric("Bonificações", n0(lista.filter(function (m) { return m.premio; }).length), lista.filter(function (m) { return m.premio; }).length ? "com prêmio definido" : "nenhuma bonificação") +
       "</div>";
@@ -4601,85 +4622,49 @@ function exportReceber() {
 /* ---------- metas ---------- */
 function modalMeta(id, mes, tenantAlvo) {
   var m = id ? find(DB.metas, id) : null;
-  window.__metaEditFat = m ? (m.alvo_faturamento || "") : ""; window.__metaEditVendas = m ? (m.alvo_vendas || "") : ""; window.__metaEditProduto = m ? (m.produto_id || "") : ""; window.__metaEditCategoria = m ? (m.categoria || "") : "";
-  window.__metaCats = {}; Q("products").forEach(function (p) { if (p.categoria) window.__metaCats[p.categoria] = 1; });
   var alvoTid = tenantAlvo || (m ? m.tenant_id : T());
   var doGrupo = alvoTid !== T();
   mes = mes || (m ? m.mes : mesRef(today()));
-  var produtos = Q("products").filter(function (p) { return p.status !== "inativo"; });
-  var cats = {}; produtos.forEach(function (p) { if (p.categoria) cats[p.categoria] = 1; });
-  var corpo = '<div class="rw rw2"><div class="fld"><label>Título da meta <span class="rq">*</span></label><input id="mt-tit" value="' + esc(m ? m.titulo : "") + '" placeholder="Ex.: Meta de setembro"></div>' +
+  var corpo = '<div class="rw rw2"><div class="fld"><label>Título da meta <span class="rq">*</span></label><input id="mt-tit" value="' + esc(m ? m.titulo : "") + '" placeholder="Ex.: Faturamento do mês"></div>' +
     '<div class="fld"><label>Mês de referência</label><input id="mt-mes" type="month" value="' + mes + '"></div></div>' +
     '<div class="fld"><label>Tipo de meta</label><select id="mt-tipo" onchange="dicaMeta()">' +
-    Object.keys(TIPO_META).map(function (k) { return '<option value="' + k + '"' + (m && m.tipo === k ? " selected" : "") + ">" + TIPO_META[k].nome + " — " + TIPO_META[k].desc + "</option>"; }).join("") + '</select></div>' +
-    '<div id="mt-alvo-wrap" class="rw rw2"><div class="fld"><label>Objetivo <span class="rq">*</span></label><input id="mt-alvo" type="number" step="0.01" value="' + (m ? m.alvo : "") + '"><div class="hp" id="mt-dica"></div></div>' +
-    '<div class="fld"><label>Prêmio / bonificação</label><input id="mt-premio" value="' + esc(m ? m.premio : "") + '" placeholder="Ex.: bonificação da equipe"></div></div>' +
-    '<div id="mt-extra"></div>' +
+    Object.keys(TIPO_META).map(function (k) { return '<option value="' + k + '"' + (m && m.tipo === k ? " selected" : "") + ">" + TIPO_META[k].nome + " — " + TIPO_META[k].desc + "</option>"; }).join("") + "</select></div>" +
+    '<div class="rw rw2"><div class="fld"><label>Objetivo <span class="rq">*</span></label><input id="mt-alvo" type="number" step="0.01" value="' + (m ? m.alvo : "") + '"><div class="hp" id="mt-dica"></div></div>' +
+    '<div class="fld"><label>Prêmio / bonificação</label><input id="mt-premio" value="' + esc(m ? m.premio : "") + '" placeholder="Ex.: cesta básica para a equipe"></div></div>' +
     (doGrupo ? nota("Esta meta será enviada para <b>" + esc(nomeEmpresa(alvoTid)) + "</b> como meta do grupo.", "inf") : "") +
     '<div id="mt-err" class="note ng hidden"></div>';
   modal(m ? "Editar meta" : "Nova meta", corpo,
-    '<button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn btn-p" onclick="salvarMeta(' + (m ? "'" + m.id + "'" : "null") + ", '" + alvoTid + "', " + (doGrupo ? "true" : "false") + ')">Salvar meta</button>');
+    '<button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn btn-p" onclick="salvarMeta(' +
+    (m ? "'" + m.id + "'" : "null") + ",'" + alvoTid + "'," + (doGrupo ? "true" : "false") + ')">Salvar meta</button>');
   dicaMeta();
 }
 function dicaMeta() {
-  var tipo = v("mt-tipo") || "faturamento", t = TIPO_META[tipo] || TIPO_META.faturamento;
-  var e = el("mt-dica"); if (e) e.textContent = t.un === "R$" ? "Valor em reais" : t.un === "vendas" ? "Quantidade de vendas" : "Quantidade de unidades";
-  var extra = el("mt-extra"), wrap = el("mt-alvo-wrap");
-  if (!extra) return;
-  if (tipo === "combinada") {
-    if (wrap) wrap.classList.add("hidden");
-    extra.innerHTML = '<div class="rw rw2"><div class="fld"><label>Meta de faturamento (R$) <span class="rq">*</span></label><input id="mt-fat" type="number" step="0.01" value="' + (window.__metaEditFat || "") + '"></div>' +
-      '<div class="fld"><label>Meta de quantidade de vendas <span class="rq">*</span></label><input id="mt-vendas" type="number" step="1" value="' + (window.__metaEditVendas || "") + '"></div></div>';
-  } else if (tipo === "unidades_produto") {
-    if (wrap) wrap.classList.remove("hidden");
-    extra.innerHTML = '<div class="fld"><label>Produto <span class="rq">*</span></label><select id="mt-produto">' + produtosMetaOptions(window.__metaEditProduto) + '</select></div>';
-  } else if (tipo === "unidades_categoria") {
-    if (wrap) wrap.classList.remove("hidden");
-    extra.innerHTML = '<div class="fld"><label>Categoria <span class="rq">*</span></label><select id="mt-categoria">' + Object.keys(window.__metaCats || {}).sort().map(function (c) { return '<option value="' + esc(c) + '"' + (window.__metaEditCategoria === c ? " selected" : "") + '>' + esc(c) + '</option>'; }).join("") + '</select></div>';
-  } else {
-    if (wrap) wrap.classList.remove("hidden");
-    extra.innerHTML = "";
-  }
-}
-function produtosMetaOptions(sel) {
-  var ps = Q("products").filter(function (p) { return p.status !== "inativo"; });
-  return ps.map(function (p) { return '<option value="' + p.id + '"' + (sel === p.id ? " selected" : "") + '>' + esc(p.nome) + '</option>'; }).join("");
+  var t = TIPO_META[v("mt-tipo")] || TIPO_META.faturamento;
+  var e = el("mt-dica"); if (e) e.textContent = t.un === "R$" ? "Valor em reais" : t.un === "vendas" ? "Quantidade de vendas" : "Quantidade (ex.: 40 cestas)";
 }
 function salvarMeta(id, tid, doGrupo) {
+  /* sem empresa informada, a meta é da empresa de quem está logado — nunca órfã */
   tid = tid && tid !== "null" && tid !== "undefined" ? tid : T();
-  var tit = v("mt-tit"), tipo = v("mt-tipo"), alvo = nv("mt-alvo"), err = el("mt-err");
+  var tit = v("mt-tit"), alvo = nv("mt-alvo"), err = el("mt-err");
   function bad(x) { err.innerHTML = "<span>" + ICON.alert + "</span><div>" + x + "</div>"; err.classList.remove("hidden"); }
   if (tit.length < 3) return bad("Informe o título da meta.");
-  var corpo = { titulo: tit, tipo: tipo, premio: v("mt-premio"), mes: v("mt-mes") || mesRef(today()), autor: Sess.user_id, realizado_manual: 0 };
-  if (tipo === "combinada") {
-    var fat = nv("mt-fat"), vendas = Math.round(nv("mt-vendas"));
-    if (!(fat > 0) || !(vendas > 0)) return bad("Informe a meta de faturamento e a quantidade de vendas.");
-    corpo.alvo = fat; corpo.alvo_faturamento = fat; corpo.alvo_vendas = vendas;
-  } else {
-    if (!(alvo > 0)) return bad("Informe um objetivo maior que zero.");
-    corpo.alvo = alvo;
-    if (tipo === "unidades_produto") {
-      corpo.produto_id = v("mt-produto");
-      if (!corpo.produto_id) return bad("Selecione o produto da meta.");
-    }
-    if (tipo === "unidades_categoria") {
-      corpo.categoria = v("mt-categoria");
-      if (!corpo.categoria) return bad("Selecione a categoria da meta.");
-    }
-  }
-  var passo;
+  if (alvo <= 0) return bad("Informe um objetivo maior que zero.");
+  var mes = v("mt-mes") || mesRef(today());
   if (id) {
-    var atual = find(DB.metas, id) || {};
-    passo = Dados.alterar("metas", id, { dados: Object.assign({}, atual, corpo) }, atual.versao);
-  } else passo = Dados.criar("metas", { id: uid("mt"), dados: corpo });
-  passo.then(function (r) {
-    if (r.erro) return bad(r.erro);
-    if (r.conflito) return bad("Alguém alterou esta meta antes. Abra de novo.");
-    fecharModal(); toast(id ? "Meta atualizada." : "Meta criada.", "ok");
-    f15_repintar(["supervisao", "dashboard", "metas"]);
-  }).catch(function () { bad("Sem resposta do servidor."); });
+    var m = find(DB.metas, id);
+    m.titulo = tit; m.alvo = alvo; m.tipo = v("mt-tipo"); m.premio = v("mt-premio"); m.mes = mes;
+    toast("Meta atualizada.", "ok");
+  } else {
+    DB.metas.push({
+      id: uid("mt"), tenant_id: tid, mes: mes, tipo: v("mt-tipo"), titulo: tit, alvo: alvo,
+      premio: v("mt-premio"), origem: doGrupo ? "grupo" : "empresa", autor: Sess.user_id, criado: today(), realizado_manual: 0
+    });
+    toast(doGrupo ? "Meta enviada para " + nomeEmpresa(tid) + "." : "Meta criada.", "ok");
+  }
+  logar("Meta definida", tit + " · " + mesLabel(mes));
+  save(); fecharModal();
+  ir(View.pg, View.p);
 }
-
 function modalProgresso(id) {
   var m = find(DB.metas, id);
   modal("Atualizar progresso", '<div class="fld"><label>' + esc(m.titulo) + '</label><input id="mp-val" type="number" step="1" value="' + (m.realizado_manual || 0) + '">' +
@@ -4816,8 +4801,7 @@ function qtdPeriodo(ini, fim, tid) {
   return DB.sales.filter(function (s) { return s.tenant_id === tid && s.status !== "cancelada" && s.data >= ini && s.data <= fim; }).length;
 }
 function metaDoMes(mes, tid, tipo) {
-  var lista = metasDoMes(mes, tid);
-  var ms = tipo ? lista.filter(function (m) { return m.tipo === tipo; }) : lista;
+  var ms = metasDoMes(mes, tid).filter(function (m) { return m.tipo === (tipo || "faturamento"); });
   return ms.length ? ms[0] : null;
 }
 function metaTrimestre(t, tid) {
@@ -5045,44 +5029,42 @@ function dashAdmin() {
   var mes = mesRef(today()), ini = mIni(today()), fim = mFim(today());
   var m = metaDoMes(mes), c = corridaDoMes();
   var realizado = faturamentoPeriodo(ini, fim), qtd = qtdPeriodo(ini, fim);
-  var pmeta = m ? progressoMeta(m) : null;
+  var alvo = m ? m.alvo : 0;
   var mesAnt = faturamentoPeriodo(mIni(addM(today(), -1)), mFim(addM(today(), -1)));
-  if (pmeta && pmeta.atingida) window.__celebrar = true;
+  if (alvo && realizado >= alvo) window.__celebrar = true;
+
   var h = head("Como está o negócio hoje", mNome(today()) + " · " + org().nome,
     '<button class="btn" onclick="ir(\'financeiro\',{tab:\'metas\'})">' + ICON.crescimento + "Metas</button>" +
     '<button class="btn btn-p" onclick="modalVenda()">' + ICON.plus + "Registrar compra</button>");
-  var principalReal = m && m.tipo === "combinada" ? pmeta.realizado.faturamento : (pmeta ? pmeta.realizado : realizado);
-  var principalAlvo = m && m.tipo === "combinada" ? pmeta.alvo_faturamento : (pmeta ? pmeta.alvo : 0);
-  var principalFmt = m && m.tipo !== "faturamento" && m.tipo !== "recebimento" && m.tipo !== "combinada" ? pmeta.fmt(pmeta.realizado) : money(principalReal);
-  var alvoFmt = m && m.tipo !== "faturamento" && m.tipo !== "recebimento" && m.tipo !== "combinada" ? pmeta.fmt(pmeta.alvo) : money(principalAlvo);
   h += arenaMeta({
     eyebrow: "Meta do mês · " + mNome(today()),
-    titulo: m ? (pmeta.atingida ? "Meta batida" : "Faltam " + (m.tipo === "combinada" ? money(pmeta.falta) : pmeta.fmt(pmeta.falta)) + " para bater a meta") : "Nenhuma meta definida para este mês",
-    sub: m ? (m.origem === "grupo" ? "Definida pelo grupo · " : "") + c.restantes + " dias até o fechamento · " + esc(m.titulo) : "Defina a meta no Gerenciador de Metas e acompanhe o progresso aqui",
-    realizado: principalReal, alvo: principalAlvo, pct: pmeta ? pmeta.pct : 0,
-    valorFmt: principalFmt, alvoFmt: alvoFmt, premio: m ? m.premio : "",
-    marcoPct: m && m.tipo === "faturamento" ? (c.idealHoje / (m.alvo || 1) * 100) : null,
+    titulo: m ? (realizado >= alvo ? "Meta batida" : "Faltam " + money(Math.max(0, alvo - realizado)) + " para bater a meta") : "Nenhuma meta definida para este mês",
+    sub: m ? (m.origem === "grupo" ? "Definida pelo grupo · " : "") + c.restantes + " dias até o fechamento · " + esc(m.titulo)
+      : "Defina a meta em Financeiro › Metas e acompanhe o progresso aqui",
+    realizado: realizado, alvo: alvo || realizado || 1, premio: m ? m.premio : "",
+    marcoPct: alvo ? c.idealHoje / alvo * 100 : null,
     extras: [
       { k: "Vendido no mês", v: n0(qtd) + (qtd === 1 ? " venda" : " vendas") },
       { k: "Ticket médio", v: money(qtd ? realizado / qtd : 0) },
-      { k: "Meta", v: m ? (TIPO_META[m.tipo] ? TIPO_META[m.tipo].nome : m.tipo) : "—" },
-      { k: "Falta", v: m ? (m.tipo === "combinada" ? money(pmeta.falta) : pmeta.fmt(pmeta.falta)) : "—" },
-      { k: "vs. mês passado", v: mesAnt ? (realizado >= mesAnt ? "▲ " : "▼ ") + pc(Math.abs((realizado - mesAnt) / mesAnt * 100)) : "—" }
+      { k: "Falta por dia", v: alvo ? money(c.faltaDia) : "—" },
+      { k: "Ritmo", v: c.idealHoje ? (c.ritmo >= 0 ? "▲ " : "▼ ") + pc(Math.abs(c.ritmo)) : "—", cor: c.ritmo >= 0 ? "#5fd3a4" : "#ffb4ae" },
+      { k: "vs. mês passado", v: mesAnt ? (realizado >= mesAnt ? "▲ " : "▼ ") + pc(Math.abs((realizado - mesAnt) / mesAnt * 100)) : "—", cor: realizado >= mesAnt ? "#5fd3a4" : "#ffb4ae" }
     ]
   });
-  h += '<div class="grid c21" style="margin-bottom:20px">' + (m && m.tipo !== "faturamento" ? atencaoBox() : corridaBox(c) + atencaoBox()) + "</div>";
+  h += '<div class="grid c21" style="margin-bottom:20px">' + corridaBox(c) + atencaoBox() + "</div>";
   h += '<div class="grid c2" style="margin-bottom:20px">' + metasVivas(T()) + blocoTrimestre(T()) + "</div>";
   h += historicoMetas(T(), 6);
   return h;
 }
+
 function dashVendedor() {
   var u = me(), cf = cfg();
   var mes = mesRef(today()), ini = mIni(today()), fim = mFim(today());
   var vs = vendasPeriodo(ini, fim, u.id);
   var total = r2(sum(vs, function (s) { return s.total; }));
   var totalAnt = r2(sum(vendasPeriodo(mIni(addM(today(), -1)), mFim(addM(today(), -1)), u.id), function (s) { return s.total; }));
-  var m = metaDoMes(mes), alvo = m ? m.alvo : 0, c = corridaDoMes(), pmeta = m ? progressoMeta(m) : null;
-  if (pmeta && pmeta.atingida) window.__celebrar = true;
+  var m = metaDoMes(mes), alvo = m ? m.alvo : 0, c = corridaDoMes();
+  if (alvo && total >= alvo) window.__celebrar = true;
 
   var h = head("Bom trabalho, " + u.nome.split(" ")[0], mNome(today()) + " · " + org().nome,
     '<button class="btn btn-p" onclick="modalVenda()">' + ICON.plus + "Registrar compra</button>");
@@ -5090,7 +5072,7 @@ function dashVendedor() {
     eyebrow: "Meta do mês",
     titulo: alvo ? (total >= alvo ? "Meta batida" : "Faltam " + money(Math.max(0, alvo - total)) + " para bater a meta") : "Nenhuma meta definida",
     sub: c.restantes + " dias até o fechamento" + (m ? " · " + esc(m.titulo) : ""),
-    realizado: m && m.tipo === "combinada" ? pmeta.realizado.faturamento : (pmeta ? pmeta.realizado : total), alvo: m && m.tipo === "combinada" ? pmeta.alvo_faturamento : (pmeta ? pmeta.alvo : 0), pct: pmeta ? pmeta.pct : 0, valorFmt: m && m.tipo !== "faturamento" && m.tipo !== "recebimento" && m.tipo !== "combinada" ? pmeta.fmt(pmeta.realizado) : money(m && m.tipo === "combinada" ? pmeta.realizado.faturamento : (pmeta ? pmeta.realizado : total)), alvoFmt: m && m.tipo !== "faturamento" && m.tipo !== "recebimento" && m.tipo !== "combinada" ? pmeta.fmt(pmeta.alvo) : money(m && m.tipo === "combinada" ? pmeta.alvo_faturamento : (pmeta ? pmeta.alvo : 0)), premio: m ? m.premio : "",
+    realizado: total, alvo: alvo || total || 1, premio: m ? m.premio : "",
     marcoPct: alvo ? c.idealHoje / alvo * 100 : null,
     extras: [
       { k: "Minhas vendas", v: n0(vs.length) },
@@ -5200,7 +5182,7 @@ function pg_rede_empresas() {
   var vg = vagasDaRede();
   h += nota(vg.cheia
     ? "A rede está no limite de <b>" + vg.limite + " empresas</b> da licença. Para incluir outra, solicite a ampliação à Vyoha."
-    : "A licença permite <b>" + vg.limite + " empresas</b> nesta rede — " + vg.livres + " vaga(s) livre(s). A criação do ambiente é feita pela Vyoha.",
+    : "A implantação permite <b>" + vg.limite + " empresas</b> nesta rede — " + vg.livres + " vaga(s) livre(s). A criação do ambiente é feita pela Vyoha.",
     vg.cheia ? "wr" : "inf");
   return h;
 }
@@ -5362,7 +5344,7 @@ function pg_rede_alertas() {
 function modalPedirEmpresa() {
   var vg = vagasDaRede();
   modal("Solicitar empresa à Vyoha",
-    nota("A criação de empresas é feita pela Vyoha. Ao enviar, sua solicitação entra na fila e a Vyoha retorna com a proposta de licença e manutenção da nova empresa.", "inf") +
+    nota("A criação de empresas é feita pela Vyoha. Ao enviar, sua solicitação entra na fila e a Vyoha retorna com a proposta de implantação e mensalidade da nova empresa.", "inf") +
     ln("Rede", org().nome) + ln("Empresas hoje", vg.uso + " de " + vg.limite) +
     '<div class="fld" style="margin-top:12px"><label>Nome da empresa <span class="rq">*</span></label><input id="pe-nome" placeholder="Nome fantasia"></div>' +
     '<div class="rw rw2"><div class="fld"><label>Cidade</label><input id="pe-cid"></div>' +
@@ -6059,7 +6041,7 @@ function pg_config(p) {
     ["copias", "Cópias e registro", "seguranca", "O que sobra se algo der errado"]
   ];
   var h = head("Configurações", "Central de configuração de " + t.nome,
-    '<button class="btn" onclick="ir(\'assinatura\')">' + ICON.fatura + "Licença e manutenção</button>");
+    '<button class="btn" onclick="ir(\'assinatura\')">' + ICON.fatura + "Implantação e mensalidade</button>");
   h += '<div class="grid c12" style="align-items:start">';
   h += '<div class="box"><div class="box-b" style="padding:12px">' + secoes.map(function (x) {
     return '<button class="sec-i' + (tab === x[0] ? " on" : "") + '" onclick="ir(\'config\',{tab:\'' + x[0] + '\'})">' + ICON[x[2]] +
@@ -6662,19 +6644,19 @@ function mudarTicket(id, st) {
 function pg_assinatura() {
   var t = org(), lic = t.licenca || { plano: "essencial", valor: 0, valor_licenca: 0, dia_venc: 10, inicio: t.criada };
   var fs = faturas(), abertas = faturasAbertas(), venc = faturaVencida();
-  var h = head("Licença e manutenção", "Licença vitalícia Vyoha e taxa mensal de manutenção da ferramenta",
+  var h = head("Implantação e mensalidade", "Implantação Vyoha e mensalidade da ferramenta",
     '<button class="btn" onclick="abrirSuporte()">' + ICON.suporte + "Falar com o suporte</button>");
   if (venc) h += nota("<b>Fatura vencida:</b> " + esc(venc.competencia) + " · " + money(venc.valor) + " venceu em " + fdate(venc.venc) +
     ". Regularize para manter o ambiente ativo.", "ng");
   h += '<div class="grid c4" style="margin-bottom:20px">' +
-    metric("Licença vitalícia", lic.valor_licenca ? money(lic.valor_licenca) : "—", "pagamento único") +
-    metric("Taxa de manutenção", money(lic.valor), "por mês, vence dia " + lic.dia_venc) +
+    metric("Implantação", lic.valor_licenca ? money(lic.valor_licenca) : "—", "pagamento único") +
+    metric("Mensalidade", money(lic.valor), "por mês, vence dia " + lic.dia_venc) +
     metric("Boletos em aberto", n0(abertas.length), abertas.length ? money(sum(abertas, function (f) { return f.valor; })) : "tudo em dia", abertas.length ? "wr" : "pos") +
     metric("Cliente desde", fdate(lic.inicio), n0(fs.filter(function (f) { return f.status === "paga"; }).length) + " boletos pagos") +
     "</div>";
   h += '<div class="grid c21">' +
     box("Boletos da manutenção", tabela([
-      { h: "Referência", r: function (f) { return "<b>" + esc(f.tipo === "licenca" ? "Licença vitalícia" : mesLabel(f.competencia)) + "</b>"; } },
+      { h: "Referência", r: function (f) { return "<b>" + esc(f.tipo === "licenca" ? "Implantação" : mesLabel(f.competencia)) + "</b>"; } },
       { h: "Descrição", r: function (f) { return '<span class="sm">' + esc(f.descricao) + "</span>"; } },
       { h: "Vencimento", r: function (f) { return fdate(f.venc); } },
       { h: "Valor", cls: "r", r: function (f) { return "<b>" + money(f.valor) + "</b>"; } },
@@ -7166,12 +7148,16 @@ function ouvirOutrasAbas() {
   });
 }
 
-/* A operação é gravada diretamente no servidor pela camada Dados.
-   `save()` permanece apenas como compatibilidade para preferências/UI
-   legadas; ele NÃO cria fila local e NÃO dispara um segundo sincronizador. */
-var _saveLocal = save;
+/* toda gravação local agenda uma subida — sem travar a tela */
+var _saveLocal = save, _syncAgendado = null;
 save = function () {
-  return _saveLocal.apply(this, arguments);
+  var deu = _saveLocal();
+  marcarAtividade();
+  contarFila(); pintarSync();
+  if (!SYNC.ligado) return deu;
+  if (_syncAgendado) clearTimeout(_syncAgendado);
+  _syncAgendado = setTimeout(function () { enviarPendentes(); }, 1500);
+  return deu;
 };
 
 /* ---------------- acesso na nuvem criado sozinho ----------------
@@ -7745,7 +7731,7 @@ var TOURS = {
     ]
   },
   assinatura: {
-    nome: "Licença e manutenção",
+    nome: "Implantação e mensalidade",
     passos: [
       { alvo: "#page .head", pos: "baixo", t: "O que está contratado",
         d: "Plano, módulos liberados, vagas de acesso e valor da manutenção. Tudo o que a Vyoha registrou para a sua empresa." },
@@ -8365,7 +8351,7 @@ sincronizar = function (depois) {
 var COPIAS = { lista: [], carregando: false, erro: "", ultima: null, feita: null };
 var REGISTRO = { lista: [], carregando: false, erro: "" };
 
-function copiasDisponiveis() { return typeof Sessao !== "undefined" && Sessao.ligada() && ["admin", "holding", "vyoha"].indexOf(Sessao.perfil()) >= 0; }
+function copiasDisponiveis() { return SYNC.ligado && nuvemViva() && ["admin", "holding"].indexOf(SYNC.perfil) >= 0; }
 
 function garantirCopiaDoDia(depois) {
   if (!copiasDisponiveis()) return depois && depois(false);
@@ -9916,30 +9902,48 @@ function painelCrediario() {
   window.tourJaVisto = function (chave) { return !!toursVistos()[chave]; };
 
   /* ─────────────────────────────────────────────────────────
-     4. COMPATIBILIDADE COM CÓDIGO LEGADO
+     4. O QUE FOI DESLIGADO, E POR QUÊ
 
-     O mecanismo antigo de fila/espelho continua definido acima apenas
-     porque existem trechos históricos no arquivo que ainda o referenciam.
-     Ele NÃO participa da sincronização atual. A fonte oficial é Dados +
-     Supabase, e a atualização entre computadores é TempoReal.
+     Estas funções existiam para compensar a falta de uma
+     autenticação de verdade. Com o Auth no lugar, elas não têm
+     mais o que fazer — e deixá-las vivas seria manter dois
+     caminhos para a mesma coisa, que é como bug nasce.
+
+     Viram função vazia em vez de sumirem, porque o vapp.js
+     ainda as chama de alguns lugares. Na Etapa 7, quando o
+     vapp.js for limpo, elas somem de vez.
      ───────────────────────────────────────────────────────── */
 
   var DESLIGADAS = [
-    "publicarAmbiente",
+    "publicarAmbiente",          /* mandava o DB inteiro para o servidor */
     "vincularAcessoNuvem",
     "confirmarPerfilNuvem",
     "removerAmbienteDoComputador",
-    "criarContaNuvem",
+    "criarContaNuvem",           /* agora é gerir_perfil + Auth */
     "alinharSenhaNuvem",
     "conectarNuvem",
     "religarNuvem",
-    "sincronizar",
+    "sincronizar",               /* não existe mais sincronismo */
     "enviarPendentes",
     "puxarDaNuvem",
     "lacoSync",
     "marcarAtividade",
     "migrarSenhas",
     "protegerSenha",
+
+    /* ACHADAS NA VARREDURA DOS 26 PONTOS DE GRAVAÇÃO
+
+       instalarAmbiente() escreve em DB.config, DB.users,
+       DB.tenants e DB.customers a partir do "pacote de
+       ambiente" que o mecanismo antigo publicava.
+
+       Ela já estava fora de alcance — as três funções que a
+       chamavam foram desligadas. Mas depender de estarem
+       desligadas é depender de ninguém religar uma delas por
+       engano num dia distraído.
+
+       Desligar a própria fecha o caminho, não a porta de
+       entrada dele. */
     "instalarAmbiente",
     "buscarAmbienteNuvem",
     "baixarAmbiente",
@@ -9954,54 +9958,63 @@ function painelCrediario() {
     }
   });
 
-  /* O chip não mostra mais a antiga migração. Quando tudo está normal,
-     ele fica oculto. Se o Realtime cair, mostra somente o estado real da
-     conexão — nunca uma fila ou "migração" inventada. */
-  window.syncPrecisaAparecer = function () {
-    if (typeof Sessao === "undefined" || !Sessao.ligada()) return false;
-    return !(typeof TempoReal !== "undefined" && TempoReal.estaVivo());
-  };
+  /* ═════════════════════════════════════════════════════════
+     O CHIP DE SINCRONIZAÇÃO · dizendo a verdade da vez
+
+     Ele lia um estado que não existe mais e escrevia "Só neste
+     computador · sincronização desligada". Estava certo por
+     acidente e errado no motivo: a sincronização não foi
+     desligada, ela foi removida — e no lugar dela o servidor
+     virou a fonte.
+
+     Mas apagar o chip seria pior. Durante a migração, uma parte
+     dos dados já vive no servidor e outra ainda não, e quem
+     está trabalhando tem o direito de saber qual é qual.
+
+     Então ele passa a contar o estado real da migração. Some
+     sozinho quando não sobrar nada local. */
+  window.syncPrecisaAparecer = function () { return true; };
+
+  /* as coleções que ainda moram neste computador.
+     Cada etapa da Fase 3 tira uma daqui. */
+  var AINDA_LOCAIS = ["customers", "products", "moves", "sales", "parcels", "cash",
+                      "metas", "cobrancas", "acordos", "analises", "restricoes",
+                      "config", "tenants", "logs"];
 
   window.textoSync = function () {
-    if (typeof Sessao === "undefined" || !Sessao.ligada()) {
-      return ["Sem sessão", "nenhum dado operacional é sincronizado sem acesso ao servidor"];
+    if (!Sessao.ligada()) return ["Fora do ar", "sem sessão"];
+    var faltam = AINDA_LOCAIS.filter(function (c) {
+      return Array.isArray(DB[c]) && DB[c].length > 0;
+    });
+    if (!faltam.length) {
+      return ["Tudo no servidor", "nenhum dado depende deste computador"];
     }
-    if (typeof TempoReal !== "undefined" && TempoReal.estaVivo()) {
-      return ["Sincronização ativa", "dados gravados no servidor e atualização em tempo real"];
-    }
-    return ["Reconectando", "a atualização em tempo real será restabelecida automaticamente"];
-  };
-
-  window.pintarSync = function () {
-    var e = el("sync-chip");
-    if (!e) return;
-    if (!syncPrecisaAparecer()) { e.classList.add("hidden"); return; }
-    e.className = "sync inf";
-    e.classList.remove("hidden");
-    var t = textoSync();
-    e.title = t[1];
-    e.innerHTML = '<span class="sync-p"></span>' + esc(t[0]);
+    return ["Migração em andamento",
+            "acesso e equipe já vêm do servidor · " + faltam.length +
+            " coleção(ões) ainda neste computador"];
   };
 
   window.modalSync = function () {
-    var ativo = typeof TempoReal !== "undefined" && TempoReal.estaVivo();
-    var assinadas = ativo && typeof TempoReal.assinadas === "function" ? TempoReal.assinadas() : [];
-    modal("Sincronização",
-      nota("<b>" + (ativo ? "Sincronização ativa" : "Reconectando") + "</b> — " +
-        (ativo ? "o servidor é a fonte oficial dos dados." : "a conexão em tempo real será restabelecida automaticamente."),
-        ativo ? "ok" : "wr") +
+    var t = textoSync();
+    var faltam = AINDA_LOCAIS.filter(function (c) {
+      return Array.isArray(DB[c]) && DB[c].length > 0;
+    });
+    modal("Onde os dados estão",
+      nota("<b>" + esc(t[0]) + "</b> — " + esc(t[1]), faltam.length ? "wr" : "") +
+      ln("Você", (Sessao.quem() && Sessao.quem().nome) || "—") +
       ln("Empresa", Sessao.empresa() || "—") +
       ln("Perfil", Sessao.perfil() || "—") +
-      ln("Tempo real", ativo ? "conectado" : "reconectando") +
-      ln("Tabelas acompanhadas", String(assinadas.length)) +
-      '<div class="hp" style="margin-top:12px">As gravações são feitas diretamente no servidor. ' +
-      'Não existe fila local de alterações nem etapa de migração para o cliente executar.</div>',
-      '<button class="btn btn-p" onclick="fecharModal()">Fechar</button>');
+      '<div class="sm mut" style="margin:14px 0 6px"><b>Já no servidor</b></div>' +
+      '<div class="sm">Acesso, sessão, empresa, perfil e equipe. Entram em qualquer ' +
+      'computador, e mudanças valem na hora.</div>' +
+      (faltam.length
+        ? '<div class="sm mut" style="margin:14px 0 6px"><b>Ainda neste computador</b></div>' +
+          '<div class="sm">' + esc(faltam.join(", ")) + '</div>' +
+          nota("Estas coleções ainda não foram migradas. Elas funcionam normalmente, mas " +
+               "<b>não aparecem em outro computador</b> até a etapa delas.", "wr")
+        : ""),
+      '<button class="btn btn-p" onclick="fecharModal()">Entendi</button>');
   };
-
-  try {
-    TempoReal.quandoMudarEstado(function () { pintarSync(); });
-  } catch (e) {}
 
   /* ─────────────────────────────────────────────────────────
      5. ARRANQUE
@@ -10265,7 +10278,7 @@ function painelCrediario() {
         repovoarConfig(); redesenhar();
       });
 
-      TempoReal.assinarVarias(["products", "products_custo", "estoque", "moves", "config_empresa"]);
+      TempoReal.assinarVarias(["products", "estoque", "moves", "config_empresa"]);
       return true;
     });
   };
@@ -10286,85 +10299,102 @@ function painelCrediario() {
      catálogo, custo e estoque na mesma transação — e recusa
      quem não é gestor, no servidor.
 
-     O estoque é definido diretamente por uma RPC própria. Venda e
-     movimentação manual são fluxos separados; editar cadastro não
-     pode ser interpretado como uma saída de estoque.
+     O estoque inicial não vai junto: criar produto e movimentar
+     estoque são coisas diferentes, e o movimento precisa de
+     motivo e autor. Vai como movimentação logo depois.
      ───────────────────────────────────────────────────────── */
 
-  function nvDinheiroProduto(id) {
-    var s = String(v(id) || "").trim();
-    if (!s) return 0;
-    s = s.replace(/R\$|\s/g, "");
-    /* No padrão brasileiro, ponto separa milhares e vírgula separa centavos.
-       2.259 => 2259 | 2.259,90 => 2259.90 | 2,25 => 2.25 */
-    if (s.indexOf(",") >= 0) {
-      s = s.replace(/\./g, "").replace(",", ".");
-    } else {
-      s = s.replace(/\./g, "");
-    }
-    s = s.replace(/[^0-9.\-]/g, "");
-    var n = parseFloat(s);
-    return isNaN(n) ? 0 : n;
-  }
+  window.salvarProduto = function (id) {
+    var nome = v("p-nome"), cat = v("p-cat"), preco = nv("p-preco"), err = el("p-err");
 
-  function produtoNomeDuplicado(nome, idAtual) {
-  var alvo = String(nome || "").trim().replace(/\s+/g, " ").toLowerCase();
-  if (!alvo) return null;
-  var lista = Q("products");
-  for (var i = 0; i < lista.length; i++) {
-    var p = lista[i];
-    if (idAtual && p.id === idAtual) continue;
-    var n = String(p.nome || p.dados && p.dados.nome || "").trim().replace(/\s+/g, " ").toLowerCase();
-    if (n === alvo && p.status !== "inativo") return p;
-  }
-  return null;
-}
-window.salvarProduto = function (id) {
-    var nome = v("p-nome"), cat = v("p-cat"), preco = nvDinheiroProduto("p-preco"), custoValor = nvDinheiroProduto("p-custo"), estoqueDesejado = Math.max(0, Math.round(nv("p-est"))), err = el("p-err");
-    function bad(m) { err.innerHTML = "<span>" + ICON.alert + "</span><div>" + esc(m) + "</div>"; err.classList.remove("hidden"); }
+    function bad(m) {
+      err.innerHTML = "<span>" + ICON.alert + "</span><div>" + esc(m) + "</div>";
+      err.classList.remove("hidden");
+    }
+
     if (nome.length < 2) return bad("Informe o nome do produto.");
     if (!cat) return bad("Informe a categoria.");
     if (preco <= 0) return bad("O preço de venda deve ser maior que zero.");
-    if (custoValor < 0) return bad("O custo não pode ser negativo.");
 
     var novo = !id;
     var pid = id || uid("p");
-    var produtoAtual = id ? find(DB.products, id) : null;
-    /* O saldo não fica em products. Ele fica na tabela estoque,
-       indexada por product_id. Nunca usar produtoAtual.estoque: esse
-       campo não é a fonte de verdade e pode ser inexistente/antigo. */
-    var estoqueRegistro = id ? Dados.um("estoque", id) : null;
-    var estoqueAtual = novo ? 0 : Math.max(0, Math.round(Number((estoqueRegistro || {}).saldo || 0)));
-    var produto = { id: pid, nome: nome, cod: v("p-cod"), categoria: cat, fornecedor: v("p-forn"), preco: preco, status: "ativo" };
-    var custo = { custo: custoValor, preco_atacado: nv("p-atacado") || null, fornecedor: v("p-forn") };
+    var estoqueInicial = novo ? Math.max(0, Math.round(nv("p-est"))) : 0;
+
+    var produto = {
+      id: pid, nome: nome, cod: v("p-cod"), categoria: cat,
+      fornecedor: v("p-forn"), preco: preco, status: "ativo"
+    };
+    var custo = {
+      custo: nv("p-custo"),
+      preco_atacado: nv("p-atacado") || null,
+      fornecedor: v("p-forn")
+    };
+
+    /* O MÍNIMO VAI NUM PACOTE SÓ DELE
+
+       Não é do catálogo: mora na tabela `estoque`, ao lado do
+       saldo. Por isso é o terceiro jsonb da RPC, e não um campo
+       dentro do `produto`.
+
+       CAMPO VAZIO E ZERO SÃO COISAS DIFERENTES:
+         vazio → null → usa o padrão da empresa
+         0     → 0    → nunca avisa sobre este produto
+
+       E é por isso que a leitura é do texto cru, não do `nv()`:
+       `nv("")` devolve 0, e isso apagaria a diferença logo na
+       entrada — o campo em branco viraria "nunca avise". */
+    var minBruto = v("p-min");
+    var minimo = minBruto === "" ? null : Number(minBruto.replace(",", "."));
+    if (minimo !== null && (!isFinite(minimo) || minimo < 0)) {
+      return bad("O estoque mínimo precisa ser um número igual ou maior que zero.");
+    }
+    var estoque = { minimo: minimo };
 
     var botao = el("p-btn");
     if (botao) { botao.disabled = true; botao.textContent = "Salvando…"; }
     function liberar() { if (botao) { botao.disabled = false; botao.textContent = "Salvar"; } }
 
-    Dados.chamar("salvar_produto", { produto: produto, custo: custo, estoque: {} })
+    Dados.chamar("salvar_produto", { produto: produto, custo: custo, estoque: estoque })
       .then(function (r) {
-        if (r && r.erro) { liberar(); return bad(r.erro); }
-        return Dados.chamar("definir_estoque", {
-          pedido: {
-            product_id: pid,
-            saldo: estoqueDesejado,
-            motivo: novo ? "Estoque inicial" : "Ajuste de estoque",
-            custo: custoValor
-          }
+        if (r.erro) { liberar(); return bad(r.erro); }
+
+        var depois = Promise.resolve();
+
+        if (estoqueInicial > 0) {
+          depois = Dados.chamar("movimentar_estoque", {
+            pedido: { product_id: pid, quantidade: estoqueInicial,
+                      tipo: "entrada", motivo: "Estoque inicial" }
+          });
+        }
+
+        return depois.then(function (m) {
+          if (m && m.erro) { liberar(); return bad(m.erro); }
+
+          /* A GRAVAÇÃO FUNCIONOU E A TELA MOSTRAVA ZERO
+
+             O salvar_produto grava, o movimentar_estoque soma —
+             e a projeção continuava com o que tinha na memória
+             de antes. A tela mostrava o estado anterior à
+             gravação, e parecia que o estoque não tinha entrado.
+
+             O Realtime até traz a mudança, mas depois; e quem
+             acabou de clicar em salvar espera ver o resultado
+             agora, não daqui a pouco.
+
+             Quem grava, recarrega. */
+          return recarregarProdutos().then(function () {
+            logar(novo ? "Produto cadastrado" : "Produto alterado", nome);
+            err.classList.add("hidden");
+            fecharModal();
+            toast(novo ? "Produto cadastrado." : "Produto atualizado.", "ok");
+            ir(View.pg, View.p);
+          });
         });
       })
-      .then(function (m) {
-        if (m && m.erro) { liberar(); return bad(m.erro); }
-        return recarregarProdutos().then(function () {
-          logar(novo ? "Produto cadastrado" : "Produto alterado", nome);
-          err.classList.add("hidden");
-          fecharModal();
-          toast(novo ? "Produto cadastrado." : "Produto atualizado.", "ok");
-          ir(View.pg, View.p);
-        });
-      })
-      .catch(function () { liberar(); bad("Não foi possível salvar o produto. Tente novamente."); });
+      .catch(function () {
+        liberar();
+        bad("Não consegui falar com o servidor. Nada foi salvo.");
+      });
   };
 
   /* ─────────────────────────────────────────────────────────
@@ -11174,7 +11204,7 @@ window.salvarProduto = function (id) {
           id: novoId,
           dados: {
             nome: nome, cpf: cpf, tel: tel, email: v("nv-mail"),
-            endereco: v("nv-end"), bairro: v("nv-bairro"),
+            nascimento: v("nv-nasc"), endereco: v("nv-end"), bairro: v("nv-bairro"),
             cep: v("nv-cep"), cidade: v("nv-cid"), uf: v("nv-uf").toUpperCase(),
             profissao: v("nv-prof"), origem: v("nv-org"), obs: ""
           }
@@ -11249,7 +11279,7 @@ window.salvarProduto = function (id) {
       parcelas: parcelas,
       bruto: draft.bruto, desconto: draft.desconto, total: draft.total,
       entrada: draft.entrada, valor_parcela: vp, forma: draft.forma,
-      obs: draft.obs, data: today(), status: "ativa"
+      obs: draft.obs, data: draft.data, status: "ativa"
     };
 
     var botao = el("d-btn");
@@ -12586,7 +12616,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 
    O QUE A AUDITORIA ACHOU
 
-   O cadastro de produto e o ajuste direto de estoque passam por funções transacionais no servidor.
+   Sete gravacoes passam por funcao transacional no servidor.
    Tres estavam protegidas de verdade — venda, recebimento e
    acordo — porque guardavam a chave numa variavel e a
    reaproveitavam na segunda tentativa.
@@ -12630,19 +12660,12 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
   }
 
   /* a chave do modal que esta por cima */
-  function f12_chaveAtual(operacao) {
+  function f12_chaveAtual() {
     try {
       if (!window.MDS || !MDS.length) { return null; }
       var id = MDS[MDS.length - 1];
-      F12_CHAVES[id] = F12_CHAVES[id] || {};
-      /* Uma chave identifica UMA intenção de UMA operação.
-         Salvar produto e lançar estoque acontecem no mesmo modal,
-         mas são duas transações diferentes e precisam de chaves
-         diferentes. O mesmo botão clicado duas vezes continua
-         usando a mesma chave da sua operação. */
-      var chave = String(operacao || 'geral');
-      if (!F12_CHAVES[id][chave]) F12_CHAVES[id][chave] = f12_uuid();
-      return F12_CHAVES[id][chave];
+      if (!F12_CHAVES[id]) { F12_CHAVES[id] = f12_uuid(); }
+      return F12_CHAVES[id];
     } catch (e) { return null; }
   }
 
@@ -12650,7 +12673,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     var modalAntigo = modal;
     modal = function () {
       var id = modalAntigo.apply(this, arguments);
-      try { F12_CHAVES[id] = {}; } catch (e) {}
+      try { F12_CHAVES[id] = f12_uuid(); } catch (e) {}
       return id;
     };
     try { window.modal = modal; } catch (e) {}
@@ -12676,7 +12699,6 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
      --------------------------------------------------------------- */
   var ONDE = {
     movimentar_estoque: function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
-    definir_estoque:    function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
     salvar_produto:     function (a, k) { if (a && a.produto) { a.produto.chave_tentativa = k; } },
     estornar_parcela:   function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
     cancelar_venda:     function (a, k) { if (a)              { a.chave                   = k; } }
@@ -12688,7 +12710,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
       try {
         var por = ONDE[funcao];
         if (por) {
-          var k = f12_chaveAtual(funcao);
+          var k = f12_chaveAtual();
           if (k) { por(argumentos, k); }
         }
       } catch (e) {}
@@ -13025,13 +13047,10 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     if (!tit || tit.length < 2) { return toast("Informe o titulo da meta.", "err"); }
     if (!(alvo > 0))            { return toast("Informe o alvo.", "err"); }
 
-    var tipo = v("mt-tipo"), corpo = {
-      titulo: tit, alvo: alvo, tipo: tipo, premio: v("mt-premio"),
+    var corpo = {
+      titulo: tit, alvo: alvo, tipo: v("mt-tipo"), premio: v("mt-premio"),
       mes: v("mt-mes"), autor: f15_eu(), realizado_manual: 0
     };
-    if (tipo === "combinada") { corpo.alvo_faturamento = nv("mt-fat"); corpo.alvo_vendas = Math.round(nv("mt-vendas")); corpo.alvo = corpo.alvo_faturamento; }
-    if (tipo === "unidades_produto") corpo.produto_id = v("mt-produto");
-    if (tipo === "unidades_categoria") corpo.categoria = v("mt-categoria");
 
     var passo;
     if (id) {
@@ -14451,13 +14470,13 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 
    O formulario antigo do modal de venda pedia doze campos:
 
-     nome, cpf, telefone, e-mail, endereco, bairro,
+     nome, cpf, telefone, nascimento, e-mail, endereco, bairro,
      cep, cidade, uf, profissao, como chegou
 
    A Analise de Credito pergunta trinta, e sao esses trinta que
    decidem se a loja fia ou nao:
 
-     identificacao   nome, cpf, dois telefones
+     identificacao   nome, cpf, nascimento, dois telefones
      moradia         cep, endereco, bairro, cidade, uf,
                      dois pontos de referencia, se a casa e
                      propria, ha quanto tempo mora ali
@@ -14575,6 +14594,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
       '<div class="rw rw3">' +
         campo("nv-tel", "Telefone 1", 'placeholder="(00) 00000-0000"', 1) +
         campo("n26-fone2", "Telefone 2", 'placeholder="Outro caminho para achar"', 1) +
+        campo("nv-nasc", "Nascimento", 'type="date"', 1) +
       "</div>" +
       '<div class="rw rw2">' +
         campo("nv-mail", "E-mail", 'type="email"') +
@@ -14681,7 +14701,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
   /* ---------- o que falta ---------- */
   var OBRIGATORIOS = [
     ["nv-nome", "nome completo"], ["nv-cpf", "CPF"], ["nv-tel", "telefone 1"],
-    ["n26-fone2", "telefone 2"],
+    ["n26-fone2", "telefone 2"], ["nv-nasc", "data de nascimento"],
     ["nv-end", "endereço"], ["nv-bairro", "bairro"], ["nv-cid", "cidade"],
     ["n26-ref1", "ponto de referência 1"], ["n26-ref2", "ponto de referência 2"],
     ["n26-moradia", "se a casa é própria"], ["n26-tempo-casa", "há quanto tempo mora aí"],
@@ -15038,6 +15058,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
       '<div class="rw rw3">' +
         campo("k-tel", "Telefone 1", c.tel, "", 1) +
         campo("k27-fone2", "Telefone 2", cr.telefone2, "", 1) +
+        campo("k-nasc", "Nascimento", c.nascimento, 'type="date"', 1) +
       "</div>" +
       '<div class="rw rw2">' +
         campo("k-mail", "E-mail", c.email, 'type="email"') +
@@ -15145,7 +15166,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
   /* ---------- o que falta ---------- */
   var OBRIGATORIOS = [
     ["k-nome", "nome completo"], ["k-cpf", "CPF"], ["k-tel", "telefone 1"],
-    ["k27-fone2", "telefone 2"],
+    ["k27-fone2", "telefone 2"], ["k-nasc", "data de nascimento"],
     ["k-end", "endereço"], ["k-bairro", "bairro"], ["k-cid", "cidade"],
     ["k27-ref1", "ponto de referência 1"], ["k27-ref2", "ponto de referência 2"],
     ["k27-moradia", "se a casa é própria"], ["k27-tempo-casa", "há quanto tempo mora aí"],
