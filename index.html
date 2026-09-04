@@ -3570,7 +3570,7 @@ function modalVenda(clienteId, itensIniciais) {
     '<div class="fld"><label>Parcelas</label><select id="d-parc" onchange="calc()">' + [1, 3, 6, 10, 12, 15, 18, 24, 30, 36].map(function (n) { return '<option value="' + n + '"' + (n === 12 ? " selected" : "") + ">" + n + "x</option>"; }).join("") + "</select></div>" +
     '<div class="fld"><label>1º vencimento</label><input id="d-venc" type="date" value="' + draft.venc + '" oninput="calc()"></div></div>' +
     '<div class="rw rw3"><div class="fld"><label>Forma de pagamento</label><select id="d-forma" onchange="calc()">' +
-    ["Entrada + crediário", "Crediário próprio", "À vista — Pix", "À vista — dinheiro", "Cartão de crédito"].map(function (f) { return "<option>" + f + "</option>"; }).join("") + "</select></div>" +
+    ["Entrada + crediário", "Crediário"].map(function (f) { return "<option>" + f + "</option>"; }).join("") + "</select></div>" +
     '<div class="fld"><label>Responsável</label><select id="d-sel" ' + (isVend() ? "disabled" : "") + ' onchange="draft.seller_id=this.value">' +
     users.map(function (u) { return '<option value="' + u.id + '"' + (u.id === me().id ? " selected" : "") + ">" + esc(u.nome) + "</option>"; }).join("") + "</select></div>" +
     '<div class="fld"><label>Observação</label><input id="d-obs" placeholder="Opcional"></div></div>' +
@@ -3626,7 +3626,7 @@ function calc() {
   draft.forma = v("d-forma") || draft.forma; draft.obs = v("d-obs");
   var bruto = r2(sum(draft.itens, function (i) { return i.preco * i.qtd; }));
   var total = r2(bruto - draft.desconto), saldo = r2(Math.max(0, total - draft.entrada));
-  var avista = draft.forma.indexOf("vista") >= 0 || draft.forma.indexOf("Cartão") >= 0;
+  var avista = false;
   var np = avista ? 0 : draft.parcelas, vp = np ? r2(saldo / np) : 0;
   el("d-itens").innerHTML = draft.itens.length ? '<div class="tw" style="border:1px solid var(--line);border-radius:13px"><table><tbody>' +
     draft.itens.map(function (i, ix) {
@@ -3675,7 +3675,7 @@ function fecharVenda() {
     var p = find(DB.products, draft.itens[i].product_id);
     if (draft.itens[i].qtd > p.estoque) return bad("Estoque insuficiente de " + p.nome + ".");
   }
-  var avista = draft.forma.indexOf("vista") >= 0 || draft.forma.indexOf("Cartão") >= 0;
+  var avista = false;
   if (!avista && bloqueado(draft.customer_id)) {
     var cbl = find(DB.customers, draft.customer_id);
     return bad("<b>" + esc(cbl.nome) + "</b> está na blacklist da empresa — crédito bloqueado" +
