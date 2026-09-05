@@ -4196,7 +4196,7 @@ function modalProduto(id) {
     '<div class="fld"><label>Fornecedor</label><input id="p-forn" value="' + esc(p ? p.fornecedor : "") + '"></div></div>' +
     '<div class="rw rw4"><div class="fld"><label>Custo (R$)</label><input id="p-custo" type="number" step="0.01" value="' + (p ? p.custo : "") + '"></div>' +
     '<div class="fld"><label>Preço (R$) <span class="rq">*</span></label><input id="p-preco" type="number" step="0.01" value="' + (p ? p.preco : "") + '"></div>' +
-    '<div class="fld"><label>Estoque ' + (p ? "(via movimentação)" : "inicial") + '</label><input id="p-est" type="number" ' + (p ? "disabled" : "") + ' value="' + (p ? p.estoque : 0) + '"></div>' +
+    '<div class="fld"><label>Estoque</label><input id="p-est" type="number" min="0" step="1" value="' + (p ? p.estoque : 0) + '"></div>' +
     /* em branco = "usa o padrão da empresa", 0 = "não me avise".
        Por isso o valor só aparece preenchido quando alguém
        definiu — o placeholder mostra qual é o padrão sem fingir
@@ -4208,28 +4208,6 @@ function modalProduto(id) {
   modal(p ? "Editar produto" : "Novo produto", corpo,
     (p && isAdmin() ? '<button class="btn btn-d" style="margin-right:auto" onclick="removerProduto(\'' + p.id + '\')">' + ICON.trash + "Excluir</button>" : "") +
     '<button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn btn-p" onclick="salvarProduto(' + (p ? "'" + p.id + "'" : "null") + ')">Salvar</button>', true);
-}
-function salvarProduto(id) {
-  var nome = v("p-nome"), cat = v("p-cat"), preco = nv("p-preco"), err = el("p-err");
-  function bad(m) { err.innerHTML = "<span style='width:17px'>" + ICON.alert + "</span><div>" + m + "</div>"; err.classList.remove("hidden"); }
-  if (nome.length < 2) return bad("Informe o nome do produto.");
-  if (!cat) return bad("Informe a categoria.");
-  if (preco <= 0) return bad("O preço de venda deve ser maior que zero.");
-  if (id) {
-    var p = find(DB.products, id);
-    p.nome = nome; p.cod = v("p-cod"); p.categoria = cat; p.fornecedor = v("p-forn");
-    p.custo = nv("p-custo"); p.preco = preco; p.min = nv("p-min") || 3;
-    logar("Produto alterado", nome); toast("Produto atualizado.", "ok");
-  } else {
-    var novo = {
-      id: uid("p"), tenant_id: T(), cod: v("p-cod"), nome: nome, categoria: cat, fornecedor: v("p-forn"),
-      custo: nv("p-custo"), preco: preco, estoque: Math.max(0, Math.round(nv("p-est"))), min: nv("p-min") || 3, status: "ativo", criado: today()
-    };
-    DB.products.push(novo);
-    if (novo.estoque > 0) DB.moves.push({ id: uid("m"), tenant_id: T(), product_id: novo.id, tipo: "entrada", qtd: novo.estoque, motivo: "Estoque inicial", user_id: Sess.user_id, data: new Date().toISOString() });
-    logar("Produto cadastrado", nome); toast("Produto cadastrado.", "ok");
-  }
-  save(); fecharModal(); if (DW) recarregarDrawer(); else ir("produtos");
 }
 /* ---------- tirar um produto do catálogo ----------
    Se ele nunca foi vendido, sai de vez. Se já entrou em alguma venda, é
@@ -10423,15 +10401,16 @@ function painelCrediario() {
   }
 
   /* ─────────────────────────────────────────────────────────
-     GRAVAR PRODUTO
+    GRAVAR PRODUTO
 
-     Uma RPC, não três gravações. `salvar_produto` escreve
-     catálogo, custo e estoque na mesma transação — e recusa
-     quem não é gestor, no servidor.
+   `salvar_produto` grava catálogo, custo e estoque mínimo.
 
-     O estoque inicial não vai junto: criar produto e movimentar
-     estoque são coisas diferentes, e o movimento precisa de
-     motivo e autor. Vai como movimentação logo depois.
+   O saldo físico do estoque é definido separadamente por
+   `definir_estoque`, usando o valor informado diretamente
+   no cadastro/edição do produto.
+
+   Não existe dependência de movimentação para informar ou
+   corrigir o saldo físico do produto.
      ───────────────────────────────────────────────────────── */
 
   window.salvarProduto = function (id) {
@@ -10448,8 +10427,7 @@ function painelCrediario() {
 
     var novo = !id;
     var pid = id || uid("p");
-    var estoqueInicial = novo ? Math.max(0, Math.round(nv("p-est"))) : 0;
-
+var estoqueDesejado = Math.max(0, Math.round(nv("p-est")));
     var produto = {
       id: pid, nome: nome, cod: v("p-cod"), categoria: cat,
       fornecedor: v("p-forn"), preco: preco, status: "ativo"
@@ -10488,14 +10466,12 @@ function painelCrediario() {
       .then(function (r) {
         if (r.erro) { liberar(); return bad(r.erro); }
 
-        var depois = Promise.resolve();
-
-        if (estoqueInicial > 0) {
-          depois = Dados.chamar("movimentar_estoque", {
-            pedido: { product_id: pid, quantidade: estoqueInicial,
-                      tipo: "entrada", motivo: "Estoque inicial" }
-          });
-        }
+        var depois = Dados.chamar("definir_estoque", {
+  pedido: {
+    product_id: pid,
+    saldo: estoqueDesejado
+  }
+});
 
         return depois.then(function (m) {
           if (m && m.erro) { liberar(); return bad(m.erro); }
@@ -12835,11 +12811,12 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
      esta camada pode subir depois do banco, sem combinar horario.
      --------------------------------------------------------------- */
   var ONDE = {
-    movimentar_estoque: function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
-    salvar_produto:     function (a, k) { if (a && a.produto) { a.produto.chave_tentativa = k; } },
-    estornar_parcela:   function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
-    cancelar_venda:     function (a, k) { if (a)              { a.chave                   = k; } }
-  };
+  movimentar_estoque: function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
+  definir_estoque:    function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
+  salvar_produto:    function (a, k) { if (a && a.produto) { a.produto.chave_tentativa = k; } },
+  estornar_parcela:  function (a, k) { if (a && a.pedido)  { a.pedido.chave_tentativa  = k; } },
+  cancelar_venda:    function (a, k) { if (a)              { a.chave                   = k; } }
+};
 
   if (window.Dados && typeof Dados.chamar === "function") {
     var chamarAntigo = Dados.chamar;
