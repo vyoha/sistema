@@ -1023,7 +1023,11 @@ var Dados = (function () {
      ───────────────────────────────────────────────────────── */
   function aplicar(tabela, registro) {
     if (!registro) return false;
-    var chave = registro.id || (tabela === "products_custo" ? registro.product_id : null);
+    var chave = registro.id || (
+  tabela === "products_custo" || tabela === "estoque"
+    ? registro.product_id
+    : null
+);
     if (!chave) return false;
     if (tabela === "products_custo" && !registro.id) registro.id = chave;
     projecao[tabela] = projecao[tabela] || {};
@@ -1123,8 +1127,10 @@ var Dados = (function () {
     return db().from(tabela).select("*").then(function (r) {
       if (r.error) return { erro: mensagem(r.error) };
       projecao[tabela] = {};
-      (r.data || []).forEach(function (l) { projecao[tabela][l.id] = l; });
-      avisar(tabela);
+     (r.data || []).forEach(function (l) {
+  var chave = tabela === "estoque" ? l.product_id : l.id;
+  projecao[tabela][chave] = l;
+});
       return { linhas: r.data || [] };
     }).catch(function () { return { erro: "Sem conexão com o servidor." }; });
   }
