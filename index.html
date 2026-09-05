@@ -10412,7 +10412,7 @@ function painelCrediario() {
      ───────────────────────────────────────────────────────── */
 
   window.salvarProduto = function (id) {
-    var nome = v("p-nome"), cat = v("p-cat"), preco = nv("p-preco"), err = el("p-err");
+  var nome = v("p-nome"), cat = v("p-cat"), preco = nvMoeda("p-preco"), err = el("p-err");
 
     function bad(m) {
       err.innerHTML = "<span>" + ICON.alert + "</span><div>" + esc(m) + "</div>";
@@ -10431,7 +10431,7 @@ var estoqueDesejado = Math.max(0, Math.round(nv("p-est")));
       fornecedor: v("p-forn"), preco: preco, status: "ativo"
     };
     var custo = {
-      custo: nv("p-custo"),
+  custo: nvMoeda("p-custo"),
       preco_atacado: nv("p-atacado") || null,
       fornecedor: v("p-forn")
     };
