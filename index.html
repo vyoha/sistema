@@ -4192,8 +4192,8 @@ function modalProduto(id) {
     '<div class="rw rw2"><div class="fld"><label>Categoria <span class="rq">*</span></label><input id="p-cat" list="cats" value="' + esc(p ? p.categoria : "") + '">' +
     '<datalist id="cats">' + cats.map(function (x) { return "<option>" + esc(x) + "</option>"; }).join("") + "</datalist></div>" +
     '<div class="fld"><label>Fornecedor</label><input id="p-forn" value="' + esc(p ? p.fornecedor : "") + '"></div></div>' +
-    '<div class="rw rw4"><div class="fld"><label>Custo (R$)</label><input id="p-custo" type="number" step="0.01" value="' + (p ? p.custo : "") + '"></div>' +
-    '<div class="fld"><label>Preço (R$) <span class="rq">*</span></label><input id="p-preco" type="number" step="0.01" value="' + (p ? p.preco : "") + '"></div>' +
+    '<div class="rw rw4"><div class="fld"><label>Custo (R$)</label><input id="p-custo" type="text" inputmode="decimal" value="' + (p ? p.custo : "") + '"></div>' +
+    '<div class="fld"><label>Preço (R$) <span class="rq">*</span></label><input id="p-preco" type="text" inputmode="decimal" value="' + (p ? p.preco : "") + '"></div>' +
     '<div class="fld"><label>Estoque</label><input id="p-est" type="number" min="0" step="1" value="' + (p ? p.estoque : 0) + '"></div>' +
     /* em branco = "usa o padrão da empresa", 0 = "não me avise".
        Por isso o valor só aparece preenchido quando alguém
