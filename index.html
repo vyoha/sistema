@@ -4090,15 +4090,7 @@ function pg_produtos() {
   var h = head("Produtos", "O que está disponível para vender agora, quanto tem e o que mais sai",
     (isAdmin() ? '<button class="btn btn-p" onclick="modalProduto()">' + ICON.plus + "Novo produto</button>" +
       '<button class="btn" onclick="modalEstoque()">' + ICON.box + "Entrada de estoque</button>" : ""));
-  h += '<div class="grid c4" style="margin-bottom:20px">' +
-    metric("Itens disponíveis", n0(sum(ativos, function (p) { return p.estoque; })), ativos.length + " produtos cadastrados") +
-    /* o vendedor não enxerga custo: o que ele precisa é o que vai vender */
-    (isAdmin()
-      ? metric("Valor em estoque", money(sum(ativos, function (p) { return p.estoque * p.custo; })), "a preço de custo")
-      : metric("Valor do catálogo", money(sum(ativos, function (p) { return p.estoque * p.preco; })), "a preço de venda")) +
-    metric("Precisam de reposição", n0(falta.length), falta.length ? "no estoque mínimo ou abaixo" : "estoque saudável", falta.length ? "neg" : "pos") +
-    metric("Mais vendido (90 dias)", top && top.q ? esc(top.p.nome.split(" ").slice(0, 2).join(" ")) : "—", top && top.q ? top.q + " unidades" : "sem saídas") +
-    "</div>";
+ 
   if (falta.length) h += nota("<b>Reposição:</b> " + esc(falta.slice(0, 4).map(function (p) { return p.nome + " (" + p.estoque + ")"; }).join(" · ")) + (falta.length > 4 ? " e mais " + (falta.length - 4) : ""), "wr");
 
   h += '<div class="filters">' +
