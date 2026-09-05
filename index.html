@@ -6639,6 +6639,165 @@ function mudarTicket(id, st) {
 }
 
 /* =======================================================================
+   CONTRATO VYOHA — assinatura eletrônica validada
+   Fluxo do cliente: baixar contrato → assinar no GOV.BR → devolver PDF.
+   A validação real é feita no servidor pela função validar-contrato-assinado.
+   ======================================================================= */
+var __contratoClienteCache = null;
+
+function contratoClienteFmtStatus(st) {
+  st = String(st || "").toLowerCase();
+  if (st === "assinado") return tag("paga") + ' <span class="sm">Contrato concluído</span>';
+  if (st === "assinado_cliente") return tag("em_atendimento") + ' <span class="sm">Aguardando assinatura da Vyoha</span>';
+  if (st === "enviado") return tag("aberta") + ' <span class="sm">Aguardando sua assinatura</span>';
+  if (st === "gerado" || st === "rascunho") return tag("aberta") + ' <span class="sm">Contrato disponível</span>';
+  return '<span class="sm mut">' + esc(st || "não informado") + '</span>';
+}
+
+function contratoClienteDados() {
+  var t = org() || {};
+  var d = t.dados || {};
+  var c = d.contrato || {};
+  return { cpf: dig(d.cpf || t.cpf || c.cpf || ""), cnpj: dig(d.cnpj || t.cnpj || c.cnpj || "") };
+}
+
+function contratoClienteBuscar() {
+  if (!Sessao.ligada()) return Promise.resolve(null);
+  var db = Sessao.conexao();
+  return db.from("contratos")
+    .select("id,status,status_atual,versao_atual,dados,criado_em")
+    .eq("tenant_id", T())
+    .order("criado_em", { ascending: false })
+    .limit(1)
+    .then(function (r) {
+      if (r.error || !r.data || !r.data.length) return null;
+      var c = r.data[0], vnum = Number(c.versao_atual || (c.dados && c.dados.versao) || 1);
+      return db.from("contrato_versoes")
+        .select("id,contrato_id,versao,status,gerado_em,enviado_em,assinado_cliente_em,assinado_vyoha_em,documento_original_path,documento_assinado_cliente_path,documento_assinado_vyoha_path,documento_final_path,validacao_cliente_status,validacao_cliente_em,validacao_vyoha_status,validacao_vyoha_em,dados")
+        .eq("contrato_id", c.id)
+        .eq("versao", vnum)
+        .limit(1)
+        .then(function (rv) {
+          var vrs = rv.data && rv.data[0] ? rv.data[0] : null;
+          __contratoClienteCache = { contrato: c, versao: vrs };
+          return __contratoClienteCache;
+        });
+    }).catch(function () { return null; });
+}
+
+function contratoClienteArquivoPath(c, vrs, tipo) {
+  if (!vrs) return "";
+  if (tipo === "final") return vrs.documento_final_path || vrs.documento_assinado_vyoha_path || vrs.documento_assinado_cliente_path || vrs.documento_original_path || "";
+  if (tipo === "cliente") return vrs.documento_assinado_cliente_path || "";
+  return vrs.documento_original_path || "";
+}
+
+function contratoClienteBaixar(tipo) {
+  var x = __contratoClienteCache, path = contratoClienteArquivoPath(x && x.contrato, x && x.versao, tipo || "original");
+  if (!path) return toast("O arquivo do contrato ainda não está disponível.", "err");
+  var db = Sessao.conexao();
+  toast("Abrindo contrato…", "inf");
+  db.storage.from("contratos").download(path).then(function (r) {
+    if (r.error || !r.data) return toast("Não foi possível abrir o contrato. Fale com a Vyoha.", "err");
+    var url = URL.createObjectURL(r.data); window.open(url, "_blank", "noopener");
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }).catch(function () { toast("Não foi possível abrir o contrato. Fale com a Vyoha.", "err"); });
+}
+
+function contratoClienteInput() {
+  var e = document.getElementById("contrato-assinado-input");
+  if (e) e.click();
+}
+
+function contratoClienteUpload(inp) {
+  var file = inp && inp.files && inp.files[0];
+  if (!file) return;
+  if (String(file.type).toLowerCase() !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
+    inp.value = ""; return toast("Envie somente o PDF assinado.", "err");
+  }
+  if (file.size > 15 * 1024 * 1024) {
+    inp.value = ""; return toast("O PDF deve ter no máximo 15 MB.", "err");
+  }
+  var x = __contratoClienteCache;
+  if (!x || !x.versao || !x.versao.id) return toast("Não consegui identificar o contrato. Recarregue a tela.", "err");
+  var tenant = String(T() || "").replace(/[^a-zA-Z0-9_-]/g, "");
+  var path = tenant + "/" + x.versao.id + "/cliente-assinado.pdf";
+  var db = Sessao.conexao();
+  var btn = document.getElementById("contrato-upload-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Enviando…"; }
+  db.storage.from("contratos").upload(path, file, { contentType: "application/pdf", upsert: true }).then(function (r) {
+    if (r.error) throw r.error;
+    return db.functions.invoke("validar-contrato-assinado", {
+      body: { contrato_versao_id: x.versao.id, tipo: "cliente", storage_path: path, bucket: "contratos" }
+    });
+  }).then(function (r) {
+    if (r.error) throw r.error;
+    var data = r.data || {};
+    if (data.ok === false) throw new Error(data.erro || data.message || "O documento não foi validado.");
+    toast("Assinatura validada. O contrato foi enviado para a Vyoha.", "ok");
+    inp.value = "";
+    fecharModal();
+    montarPagina();
+  }).catch(function (e) {
+    console.error("[Contrato] validação:", e);
+    var msg = String(e && (e.message || e.error_description || e) || "");
+    if (/assinatura|valid|reprov|indeterm|aprov/i.test(msg)) msg = "O PDF foi recebido, mas a assinatura não pôde ser validada. Assine o documento no GOV.BR e envie o PDF baixado de lá.";
+    else msg = "Não foi possível concluir o envio do contrato. Tente novamente.";
+    toast(msg, "err");
+    if (btn) { btn.disabled = false; btn.textContent = "Enviar PDF assinado"; }
+  });
+}
+
+function contratoClienteGuia() {
+  var x = __contratoClienteCache, vrs = x && x.versao, st = String(vrs && vrs.status || "").toLowerCase();
+  if (!vrs) return;
+  var podeEnviar = ["enviado", "gerado"].indexOf(st) >= 0 || !st;
+  var assinadoCliente = st === "assinado_cliente";
+  var concluido = st === "assinado";
+  var corpo = '<div class="box-b">' +
+    '<div style="display:flex;gap:14px;align-items:flex-start">' +
+    '<div style="font-size:26px;line-height:1">' + ICON.fatura + '</div>' +
+    '<div><b>Contrato de prestação de serviços Vyoha</b><div class="sm mut" style="margin-top:4px">O contrato é assinado fora do sistema, pelo GOV.BR. O sistema só registra a assinatura depois que o PDF devolvido passa pela validação.</div></div></div>' +
+    '<div style="margin-top:18px">' + contratoClienteFmtStatus(st) + '</div></div>';
+  if (concluido) {
+    corpo += nota("As duas assinaturas foram registradas e o contrato está concluído.", "pos") +
+      '<button class="btn btn-p" onclick="contratoClienteBaixar(\'final\')">' + ICON.print + ' Abrir contrato final</button>';
+  } else if (assinadoCliente) {
+    corpo += nota("Sua assinatura já foi validada. Agora falta somente a assinatura da Vyoha.", "inf") +
+      (contratoClienteArquivoPath(x.contrato, vrs, "cliente") ? '<button class="btn" onclick="contratoClienteBaixar(\'cliente\')">Abrir PDF validado</button>' : "");
+  } else if (podeEnviar) {
+    corpo += '<div style="display:grid;gap:10px;margin-top:16px">' +
+      '<div class="note inf"><b>1. Baixe o contrato</b><br>Abra o PDF original e confira os dados da contratação.</div>' +
+      '<div class="note inf"><b>2. Assine no GOV.BR</b><br>Entre na sua conta GOV.BR, faça a assinatura eletrônica e baixe o PDF assinado. A assinatura deve permanecer no arquivo.</div>' +
+      '<div class="note inf"><b>3. Devolva o PDF aqui</b><br>O sistema verifica automaticamente a assinatura antes de registrar que você assinou.</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">' +
+      (contratoClienteArquivoPath(x.contrato, vrs, "original") ? '<button class="btn" onclick="contratoClienteBaixar(\'original\')">Baixar contrato</button>' : '<span class="sm mut">O contrato ainda está sendo preparado pela Vyoha.</span>') +
+      '<button class="btn btn-p" id="contrato-upload-btn" onclick="contratoClienteInput()">Enviar PDF assinado</button>' +
+      '<input id="contrato-assinado-input" type="file" accept="application/pdf,.pdf" class="hidden" onchange="contratoClienteUpload(this)">' +
+      '</div></div>';
+  } else {
+    corpo += nota("O contrato ainda não está disponível para assinatura. A Vyoha será responsável pela liberação.", "inf");
+  }
+  modal("Contrato Vyoha", corpo, '<button class="btn" onclick="fecharModal()">Fechar</button>');
+}
+
+function montarContratoCliente() {
+  var box = box("Contrato da Vyoha", '<div id="contrato-cliente-box"><div class="sm mut">Consultando o contrato…</div></div>');
+  contratoClienteBuscar().then(function (x) {
+    var e = el("contrato-cliente-box"); if (!e) return;
+    if (!x || !x.versao) {
+      e.innerHTML = '<div class="sm mut">Nenhum contrato disponível para esta empresa no momento.</div>';
+      return;
+    }
+    var vrs = x.versao, st = String(vrs.status || "").toLowerCase(), path = contratoClienteArquivoPath(x.contrato, vrs, "original");
+    e.innerHTML = '<div class="ln"><span class="k">Situação</span><span class="v">' + contratoClienteFmtStatus(st) + '</span></div>' +
+      '<div class="ln"><span class="k">Versão</span><span class="v">' + esc(String(vrs.versao || 1)) + '</span></div>' +
+      (path ? '<div style="margin-top:14px"><button class="btn btn-p" onclick="contratoClienteGuia()">Abrir contrato e assinatura</button></div>' : '<div class="sm mut" style="margin-top:12px">O arquivo ainda não foi disponibilizado.</div>');
+  });
+  return box;
+}
+
+/* =======================================================================
    ASSINATURA DO CLIENTE — licença e mensalidades
    ======================================================================= */
 function pg_assinatura() {
@@ -6654,6 +6813,7 @@ function pg_assinatura() {
     metric("Boletos em aberto", n0(abertas.length), abertas.length ? money(sum(abertas, function (f) { return f.valor; })) : "tudo em dia", abertas.length ? "wr" : "pos") +
     metric("Cliente desde", fdate(lic.inicio), n0(fs.filter(function (f) { return f.status === "paga"; }).length) + " boletos pagos") +
     "</div>";
+  h += montarContratoCliente();
   h += '<div class="grid c21">' +
     box("Boletos da manutenção", tabela([
       { h: "Referência", r: function (f) { return "<b>" + esc(f.tipo === "licenca" ? "Implantação" : mesLabel(f.competencia)) + "</b>"; } },
