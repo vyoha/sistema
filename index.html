@@ -984,7 +984,7 @@ var Dados = (function () {
   var ouvintes = {};
 
   /* as tabelas pequenas cabem inteiras; as grandes vêm por janela */
-  var INTEIRAS = ["equipe", "config_empresa", "metas", "products", "estoque", "restricoes"];
+  var INTEIRAS = ["equipe", "config_empresa", "metas", "products", "products_custo", "estoque", "restricoes"];
   var POR_JANELA = ["customers", "sales", "parcels", "moves", "cash",
                     "cobrancas", "acordos", "leads_empresa", "analises", "logs"];
 
@@ -1022,12 +1022,15 @@ var Dados = (function () {
      Em todos, o de versão menor ou igual é descartado.
      ───────────────────────────────────────────────────────── */
   function aplicar(tabela, registro) {
-    if (!registro || !registro.id) return false;
+    if (!registro) return false;
+    var chave = registro.id || (tabela === "products_custo" ? registro.product_id : null);
+    if (!chave) return false;
+    if (tabela === "products_custo" && !registro.id) registro.id = chave;
     projecao[tabela] = projecao[tabela] || {};
-    var atual = projecao[tabela][registro.id];
+    var atual = projecao[tabela][chave];
     if (atual && registro.versao != null && atual.versao != null
         && registro.versao <= atual.versao) return false;   /* eco, ignora */
-    projecao[tabela][registro.id] = registro;
+    projecao[tabela][chave] = registro;
     return true;
   }
 
@@ -4464,7 +4467,8 @@ function pg_financeiro(p) {
       metric("Peso no resultado", pc(r12.receita ? sum(proLabore(mIni(addM(today(), -11)), mFim(today())), function (x) { return x.valor; }) / r12.receita * 100 : 0), "do faturamento em 12 meses") +
       "</div>";
     if (restante < 0) h += nota("As retiradas do mês ultrapassaram o pró-labore definido. Ajuste o valor em Configurações ou reduza a próxima retirada.", "wr");
-    h += '<div class="grid c21">' +
+    h += montarContratoCliente();
+  h += '<div class="grid c21">' +
       box("Histórico de retiradas", tabela([
         { h: "Data", r: function (x) { return fdate(x.data); } },
         { h: "Descrição", r: function (x) { return esc(x.descricao); } },
@@ -6641,155 +6645,131 @@ function mudarTicket(id, st) {
 }
 
 /* =======================================================================
-   CONTRATO VYOHA — assinatura eletrônica validada
-   Fluxo do cliente: baixar contrato → assinar no GOV.BR → devolver PDF.
-   A validação real é feita no servidor pela função validar-contrato-assinado.
-   ======================================================================= */
-var __contratoClienteCache = null;
-
-function contratoClienteFmtStatus(st) {
-  st = String(st || "").toLowerCase();
-  if (st === "assinado") return tag("paga") + ' <span class="sm">Contrato concluído</span>';
-  if (st === "assinado_cliente") return tag("em_atendimento") + ' <span class="sm">Aguardando assinatura da Vyoha</span>';
-  if (st === "enviado") return tag("aberta") + ' <span class="sm">Aguardando sua assinatura</span>';
-  if (st === "gerado" || st === "rascunho") return tag("aberta") + ' <span class="sm">Contrato disponível</span>';
-  return '<span class="sm mut">' + esc(st || "não informado") + '</span>';
-}
-
-function contratoClienteDados() {
-  var t = org() || {};
-  var d = t.dados || {};
-  var c = d.contrato || {};
-  return { cpf: dig(d.cpf || t.cpf || c.cpf || ""), cnpj: dig(d.cnpj || t.cnpj || c.cnpj || "") };
-}
-
-function contratoClienteBuscar() {
-  if (!Sessao.ligada()) return Promise.resolve(null);
-  var db = Sessao.conexao();
-  return db.rpc("contrato_cliente_atual")
-    .then(function (r) {
-      if (r.error || !r.data) return null;
-      __contratoClienteCache = { contrato: r.data.contrato || null, versao: r.data.versao || null };
-      return __contratoClienteCache;
-    }).catch(function () { return null; });
-}
-
-function contratoClienteArquivoPath(c, vrs, tipo) {
-  if (!vrs) return "";
-  if (tipo === "final") return vrs.documento_final_path || vrs.documento_assinado_vyoha_path || vrs.documento_assinado_cliente_path || vrs.documento_original_path || "";
-  if (tipo === "cliente") return vrs.documento_assinado_cliente_path || "";
-  return vrs.documento_original_path || "";
-}
-
-function contratoClienteBaixar(tipo) {
-  var x = __contratoClienteCache, path = contratoClienteArquivoPath(x && x.contrato, x && x.versao, tipo || "original");
-  if (!path) return toast("O arquivo do contrato ainda não está disponível.", "err");
-  var db = Sessao.conexao();
-  toast("Abrindo contrato…", "inf");
-  db.storage.from("contratos").download(path).then(function (r) {
-    if (r.error || !r.data) return toast("Não foi possível abrir o contrato. Fale com a Vyoha.", "err");
-    var url = URL.createObjectURL(r.data); window.open(url, "_blank", "noopener");
-    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
-  }).catch(function () { toast("Não foi possível abrir o contrato. Fale com a Vyoha.", "err"); });
-}
-
-function contratoClienteInput() {
-  var e = document.getElementById("contrato-assinado-input");
-  if (e) e.click();
-}
-
-function contratoClienteUpload(inp) {
-  var file = inp && inp.files && inp.files[0];
-  if (!file) return;
-  if (String(file.type).toLowerCase() !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
-    inp.value = ""; return toast("Envie somente o PDF assinado.", "err");
-  }
-  if (file.size > 15 * 1024 * 1024) {
-    inp.value = ""; return toast("O PDF deve ter no máximo 15 MB.", "err");
-  }
-  var x = __contratoClienteCache;
-  if (!x || !x.versao || !x.versao.id) return toast("Não consegui identificar o contrato. Recarregue a tela.", "err");
-  var tenant = String(T() || "").replace(/[^a-zA-Z0-9_-]/g, "");
-  var path = tenant + "/" + x.versao.id + "/cliente-assinado.pdf";
-  var db = Sessao.conexao();
-  var btn = document.getElementById("contrato-upload-btn");
-  if (btn) { btn.disabled = true; btn.textContent = "Enviando…"; }
-  db.storage.from("contratos").upload(path, file, { contentType: "application/pdf", upsert: true }).then(function (r) {
-    if (r.error) throw r.error;
-    return db.functions.invoke("validar-contrato-assinado", {
-      body: { contrato_versao_id: x.versao.id, tipo: "cliente", storage_path: path, bucket: "contratos" }
-    });
-  }).then(function (r) {
-    if (r.error) throw r.error;
-    var data = r.data || {};
-    if (data.ok === false) throw new Error(data.erro || data.message || "O documento não foi validado.");
-    toast("Assinatura validada. O contrato foi enviado para a Vyoha.", "ok");
-    inp.value = "";
-    fecharModal();
-    montarPagina();
-  }).catch(function (e) {
-    console.error("[Contrato] validação:", e);
-    var msg = String(e && (e.message || e.error_description || e) || "");
-    if (/assinatura|valid|reprov|indeterm|aprov/i.test(msg)) msg = "O PDF foi recebido, mas a assinatura não pôde ser validada. Assine o documento no GOV.BR e envie o PDF baixado de lá.";
-    else msg = "Não foi possível concluir o envio do contrato. Tente novamente.";
-    toast(msg, "err");
-    if (btn) { btn.disabled = false; btn.textContent = "Enviar PDF assinado"; }
-  });
-}
-
-function contratoClienteGuia() {
-  var x = __contratoClienteCache, vrs = x && x.versao, st = String(vrs && vrs.status || "").toLowerCase();
-  if (!vrs) return;
-  var podeEnviar = ["enviado", "gerado"].indexOf(st) >= 0 || !st;
-  var assinadoCliente = st === "assinado_cliente";
-  var concluido = st === "assinado";
-  var corpo = '<div class="box-b">' +
-    '<div style="display:flex;gap:14px;align-items:flex-start">' +
-    '<div style="font-size:26px;line-height:1">' + ICON.fatura + '</div>' +
-    '<div><b>Contrato de prestação de serviços Vyoha</b><div class="sm mut" style="margin-top:4px">O contrato é assinado fora do sistema, pelo GOV.BR. O sistema só registra a assinatura depois que o PDF devolvido passa pela validação.</div></div></div>' +
-    '<div style="margin-top:18px">' + contratoClienteFmtStatus(st) + '</div></div>';
-  if (concluido) {
-    corpo += nota("As duas assinaturas foram registradas e o contrato está concluído.", "pos") +
-      '<button class="btn btn-p" onclick="contratoClienteBaixar(\'final\')">' + ICON.print + ' Abrir contrato final</button>';
-  } else if (assinadoCliente) {
-    corpo += nota("Sua assinatura já foi validada. Agora falta somente a assinatura da Vyoha.", "inf") +
-      (contratoClienteArquivoPath(x.contrato, vrs, "cliente") ? '<button class="btn" onclick="contratoClienteBaixar(\'cliente\')">Abrir PDF validado</button>' : "");
-  } else if (podeEnviar) {
-    corpo += '<div style="display:grid;gap:10px;margin-top:16px">' +
-      '<div class="note inf"><b>1. Baixe o contrato</b><br>Abra o PDF original e confira os dados da contratação.</div>' +
-      '<div class="note inf"><b>2. Assine no GOV.BR</b><br>Entre na sua conta GOV.BR, faça a assinatura eletrônica e baixe o PDF assinado. A assinatura deve permanecer no arquivo.</div>' +
-      '<div class="note inf"><b>3. Devolva o PDF aqui</b><br>O sistema verifica automaticamente a assinatura antes de registrar que você assinou.</div>' +
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">' +
-      (contratoClienteArquivoPath(x.contrato, vrs, "original") ? '<button class="btn" onclick="contratoClienteBaixar(\'original\')">Baixar contrato</button>' : '<span class="sm mut">O contrato ainda está sendo preparado pela Vyoha.</span>') +
-      '<button class="btn btn-p" id="contrato-upload-btn" onclick="contratoClienteInput()">Enviar PDF assinado</button>' +
-      '<input id="contrato-assinado-input" type="file" accept="application/pdf,.pdf" class="hidden" onchange="contratoClienteUpload(this)">' +
-      '</div></div>';
-  } else {
-    corpo += nota("O contrato ainda não está disponível para assinatura. A Vyoha será responsável pela liberação.", "inf");
-  }
-  modal("Contrato Vyoha", corpo, '<button class="btn" onclick="fecharModal()">Fechar</button>');
-}
-
-function montarContratoCliente() {
-  var box = box("Contrato da Vyoha", '<div id="contrato-cliente-box"><div class="sm mut">Consultando o contrato…</div></div>');
-  contratoClienteBuscar().then(function (x) {
-    var e = el("contrato-cliente-box"); if (!e) return;
-    if (!x || !x.versao) {
-      e.innerHTML = '<div class="sm mut">Nenhum contrato disponível para esta empresa no momento.</div>';
-      return;
-    }
-    var vrs = x.versao, st = String(vrs.status || "").toLowerCase(), path = contratoClienteArquivoPath(x.contrato, vrs, "original");
-    e.innerHTML = '<div class="ln"><span class="k">Situação</span><span class="v">' + contratoClienteFmtStatus(st) + '</span></div>' +
-      '<div class="ln"><span class="k">Versão</span><span class="v">' + esc(String(vrs.versao || 1)) + '</span></div>' +
-      (path ? '<div style="margin-top:14px"><button class="btn btn-p" onclick="contratoClienteGuia()">Abrir contrato e assinatura</button></div>' : '<div class="sm mut" style="margin-top:12px">O arquivo ainda não foi disponibilizado.</div>');
-  });
-  return box;
-}
-
-/* =======================================================================
    ASSINATURA DO CLIENTE — licença e mensalidades
    ======================================================================= */
+/* =======================================================================
+   CONTRATO VYOHA · área do cliente
+   Fluxo: baixar original → assinar no GOV.BR → enviar PDF → validação ITI.
+   Não grava assinatura desenhada nem aceita status local como prova.
+   ======================================================================= */
+var CONTRATO_CLIENTE = { dados: null, carregando: false };
+function contratoClienteFmtStatus(st) {
+  var m = {
+    gerado: ["Contrato gerado", "O documento original está disponível para conferência."],
+    enviado: ["Aguardando sua assinatura", "Assine o PDF pelo GOV.BR e envie o arquivo assinado."],
+    assinado_cliente: ["Assinatura do cliente validada", "Aguardando a assinatura da Vyoha."],
+    assinado: ["Contrato assinado", "As duas assinaturas foram validadas."],
+    rascunho: ["Em preparação", "O contrato ainda está sendo preparado pela Vyoha."]
+  };
+  return m[st] || ["Status do contrato", "Confira as informações abaixo."];
+}
+function contratoClienteDados(d) {
+  return d && d.contrato && d.versao ? d : null;
+}
+function contratoClienteBuscar() {
+  if (CONTRATO_CLIENTE.carregando) return Promise.resolve(CONTRATO_CLIENTE.dados);
+  CONTRATO_CLIENTE.carregando = true;
+  return Sessao.conexao().rpc("contrato_cliente_atual").then(function (r) {
+    CONTRATO_CLIENTE.carregando = false;
+    if (r.error) throw r.error;
+    CONTRATO_CLIENTE.dados = contratoClienteDados(r.data);
+    return CONTRATO_CLIENTE.dados;
+  }).catch(function (e) {
+    CONTRATO_CLIENTE.carregando = false;
+    CONTRATO_CLIENTE.dados = null;
+    throw e;
+  });
+}
+function contratoClienteArquivoPath(dados, tipo) {
+  var v = dados && dados.versao;
+  if (!v) return "";
+  if (tipo === "original") return v.documento_original_path || "";
+  if (tipo === "cliente") return v.documento_assinado_cliente_path || "";
+  if (tipo === "final") return v.documento_final_path || "";
+  return "";
+}
+function contratoClienteBaixar(tipo) {
+  var d = CONTRATO_CLIENTE.dados, path = contratoClienteArquivoPath(d, tipo || "original");
+  if (!path) return toast("O documento ainda não está disponível.", "er");
+  Sessao.conexao().storage.from("contratos").createSignedUrl(path, 120, { download: true }).then(function (r) {
+    if (r.error || !r.data || !r.data.signedUrl) return toast("Não foi possível abrir o contrato.", "er");
+    window.open(r.data.signedUrl, "_blank", "noopener");
+  }).catch(function () { toast("Não foi possível abrir o contrato.", "er"); });
+}
+function contratoClienteValidar(input) {
+  var d = CONTRATO_CLIENTE.dados, v = d && d.versao, file = input && input.files && input.files[0];
+  if (!d || !v) return toast("Contrato não encontrado.", "er");
+  if (!file) return;
+  if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name || "")) {
+    input.value = "";
+    return toast("Envie somente o PDF assinado pelo GOV.BR.", "er");
+  }
+  if (file.size <= 0) { input.value = ""; return toast("O PDF está vazio.", "er"); }
+  if (file.size > 20 * 1024 * 1024) { input.value = ""; return toast("O PDF excede o limite de 20 MB.", "er"); }
+  var path = T() + "/" + v.id + "/cliente-assinado.pdf";
+  var bt = el("contrato-cliente-enviar");
+  if (bt) { bt.disabled = true; bt.textContent = "Validando…"; }
+  Sessao.conexao().storage.from("contratos").upload(path, file, { upsert: true, contentType: "application/pdf", cacheControl: "3600" })
+    .then(function (r) {
+      if (r.error) throw r.error;
+      return Sessao.conexao().functions.invoke("validar-contrato-assinado", {
+        body: { contrato_versao_id: v.id, tipo: "cliente", storage_path: path }
+      });
+    })
+    .then(function (r) {
+      if (r.error) {
+        var msg = r.data && r.data.erro ? r.data.erro : (r.error.message || "Não foi possível validar o PDF.");
+        throw new Error(msg);
+      }
+      var data = r.data || {};
+      if (data.erro || data.ok === false) throw new Error(data.erro || "A assinatura não foi validada.");
+      toast("PDF enviado e assinatura validada.", "ok");
+      return contratoClienteBuscar();
+    })
+    .then(function () { if (typeof ir === "function") ir("assinatura", { contrato: "atual" }); })
+    .catch(function (e) { toast(e && e.message ? e.message : "Não foi possível concluir a validação.", "er"); })
+    .finally(function () {
+      input.value = "";
+      if (bt) { bt.disabled = false; bt.textContent = "Enviar PDF assinado"; }
+    });
+}
+function montarContratoCliente() {
+  var d = CONTRATO_CLIENTE.dados;
+  if (!d || !d.versao) {
+    return box("Contrato Vyoha", '<div class="box-b"><p class="sm mut">Nenhum contrato disponível para este ambiente.</p></div>');
+  }
+  var v = d.versao, st = contratoClienteFmtStatus(v.status), original = contratoClienteArquivoPath(d, "original");
+  var acao = "";
+  if (v.status === "enviado") {
+    acao = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">' +
+      '<button class="btn" onclick="contratoClienteBaixar(\'original\')">Baixar contrato</button>' +
+      '<label class="btn btn-p" style="cursor:pointer">Enviar PDF assinado<input id="contrato-cliente-input" type="file" accept="application/pdf,.pdf" onchange="contratoClienteValidar(this)" style="display:none"></label>' +
+      '</div>' +
+      '<div class="hp" style="margin-top:12px">Assine pelo GOV.BR usando assinatura eletrônica avançada (conta prata ou ouro). Depois, envie aqui o PDF assinado. A assinatura só é registrada após validação oficial.</div>';
+  } else if (v.status === "gerado" && original) {
+    acao = '<div style="margin-top:16px"><button class="btn" onclick="contratoClienteBaixar(\'original\')">Baixar contrato original</button></div>';
+  } else if (v.status === "assinado_cliente") {
+    acao = '<div style="margin-top:16px">' + tag("validado") + '<div class="hp" style="margin-top:10px">Sua assinatura foi validada. A Vyoha concluirá a assinatura do contrato.</div></div>';
+  } else if (v.status === "assinado") {
+    acao = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">' +
+      (contratoClienteArquivoPath(d, "final") ? '<button class="btn btn-p" onclick="contratoClienteBaixar(\'final\')">Baixar contrato final</button>' : '') +
+      '</div>';
+  }
+  return box("Contrato Vyoha", '<div class="box-b">' +
+    '<div style="display:flex;align-items:flex-start;gap:14px;justify-content:space-between;flex-wrap:wrap">' +
+      '<div><b style="display:block;font-size:14px;margin-bottom:5px">' + esc(st[0]) + '</b><p class="sm mut" style="margin:0">' + esc(st[1]) + '</p></div>' +
+      tag(v.status === "assinado" ? "assinado" : v.status === "assinado_cliente" ? "assinado_cliente" : v.status) +
+    '</div>' + acao + '</div>');
+}
+function carregarContratoCliente() {
+  return contratoClienteBuscar().catch(function (e) {
+    console.warn("Contrato Vyoha:", e);
+    return null;
+  });
+}
+
 function pg_assinatura() {
+  if (!CONTRATO_CLIENTE.dados && !CONTRATO_CLIENTE.carregando) { carregarContratoCliente().then(function () { if (View.pg === "assinatura") ir("assinatura", View.p); }); }
   var t = org(), lic = t.licenca || { plano: "essencial", valor: 0, valor_licenca: 0, dia_venc: 10, inicio: t.criada };
   var fs = faturas(), abertas = faturasAbertas(), venc = faturaVencida();
   var h = head("Implantação e mensalidade", "Implantação Vyoha e mensalidade da ferramenta",
@@ -6802,7 +6782,6 @@ function pg_assinatura() {
     metric("Boletos em aberto", n0(abertas.length), abertas.length ? money(sum(abertas, function (f) { return f.valor; })) : "tudo em dia", abertas.length ? "wr" : "pos") +
     metric("Cliente desde", fdate(lic.inicio), n0(fs.filter(function (f) { return f.status === "paga"; }).length) + " boletos pagos") +
     "</div>";
-  h += montarContratoCliente();
   h += '<div class="grid c21">' +
     box("Boletos da manutenção", tabela([
       { h: "Referência", r: function (f) { return "<b>" + esc(f.tipo === "licenca" ? "Implantação" : mesLabel(f.competencia)) + "</b>"; } },
@@ -7297,9 +7276,7 @@ function ouvirOutrasAbas() {
   });
 }
 
-/* A operação é gravada diretamente no servidor pela camada Dados.
-   `save()` permanece apenas como compatibilidade para preferências/UI
-   legadas; ele NÃO cria fila local e NÃO dispara um segundo sincronizador. */
+/* toda gravação local agenda uma subida — sem travar a tela */
 var _saveLocal = save;
 save = function () {
   return _saveLocal.apply(this, arguments);
@@ -10060,21 +10037,35 @@ function painelCrediario() {
      ───────────────────────────────────────────────────────── */
 
   var DESLIGADAS = [
-    "publicarAmbiente",
+    "publicarAmbiente",          /* mandava o DB inteiro para o servidor */
     "vincularAcessoNuvem",
     "confirmarPerfilNuvem",
     "removerAmbienteDoComputador",
-    "criarContaNuvem",
+    "criarContaNuvem",           /* agora é gerir_perfil + Auth */
     "alinharSenhaNuvem",
     "conectarNuvem",
     "religarNuvem",
-    "sincronizar",
+    "sincronizar",               /* não existe mais sincronismo */
     "enviarPendentes",
     "puxarDaNuvem",
     "lacoSync",
     "marcarAtividade",
     "migrarSenhas",
     "protegerSenha",
+
+    /* ACHADAS NA VARREDURA DOS 26 PONTOS DE GRAVAÇÃO
+
+       instalarAmbiente() escreve em DB.config, DB.users,
+       DB.tenants e DB.customers a partir do "pacote de
+       ambiente" que o mecanismo antigo publicava.
+
+       Ela já estava fora de alcance — as três funções que a
+       chamavam foram desligadas. Mas depender de estarem
+       desligadas é depender de ninguém religar uma delas por
+       engano num dia distraído.
+
+       Desligar a própria fecha o caminho, não a porta de
+       entrada dele. */
     "instalarAmbiente",
     "buscarAmbienteNuvem",
     "baixarAmbiente",
@@ -10089,44 +10080,22 @@ function painelCrediario() {
     }
   });
 
-  /* ─────────────────────────────────────────────────────────
-     4. COMPATIBILIDADE COM CÓDIGO LEGADO
+  /* ═════════════════════════════════════════════════════════
+     O CHIP DE SINCRONIZAÇÃO · dizendo a verdade da vez
 
-     O mecanismo antigo de fila/espelho continua definido acima apenas
-     porque existem trechos históricos no arquivo que ainda o referenciam.
-     Ele NÃO participa da sincronização atual. A fonte oficial é Dados +
-     Supabase, e a atualização entre computadores é TempoReal.
-     ───────────────────────────────────────────────────────── */
+     Ele lia um estado que não existe mais e escrevia "Só neste
+     computador · sincronização desligada". Estava certo por
+     acidente e errado no motivo: a sincronização não foi
+     desligada, ela foi removida — e no lugar dela o servidor
+     virou a fonte.
 
-  var DESLIGADAS = [
-    "publicarAmbiente",
-    "vincularAcessoNuvem",
-    "confirmarPerfilNuvem",
-    "removerAmbienteDoComputador",
-    "criarContaNuvem",
-    "alinharSenhaNuvem",
-    "conectarNuvem",
-    "religarNuvem",
-    "sincronizar",
-    "enviarPendentes",
-    "puxarDaNuvem",
-    "lacoSync",
-    "marcarAtividade",
-    "migrarSenhas",
-    "protegerSenha",
-    "instalarAmbiente",
-    "buscarAmbienteNuvem",
-    "baixarAmbiente",
-    "lembrarEmpresa",
-    "esquecerEmpresa",
-    "aplicarRemoto"
-  ];
+     Mas apagar o chip seria pior. Durante a migração, uma parte
+     dos dados já vive no servidor e outra ainda não, e quem
+     está trabalhando tem o direito de saber qual é qual.
 
-  DESLIGADAS.forEach(function (nome) {
-    if (typeof window[nome] === "function") {
-      window[nome] = function () { return undefined; };
-    }
-  });
+     Então ele passa a contar o estado real da migração. Some
+     sozinho quando não sobrar nada local. */
+  window.syncPrecisaAparecer = function () { return true; };
 
   /* O chip não mostra mais a antiga migração. Quando tudo está normal,
      ele fica oculto. Se o Realtime cair, mostra somente o estado real da
@@ -10439,7 +10408,7 @@ function painelCrediario() {
         repovoarConfig(); redesenhar();
       });
 
-      TempoReal.assinarVarias(["products", "estoque", "moves", "config_empresa"]);
+      TempoReal.assinarVarias(["products", "products_custo", "estoque", "moves", "config_empresa"]);
       return true;
     });
   };
@@ -12821,12 +12790,19 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
   }
 
   /* a chave do modal que esta por cima */
-  function f12_chaveAtual() {
+  function f12_chaveAtual(operacao) {
     try {
       if (!window.MDS || !MDS.length) { return null; }
       var id = MDS[MDS.length - 1];
-      if (!F12_CHAVES[id]) { F12_CHAVES[id] = f12_uuid(); }
-      return F12_CHAVES[id];
+      F12_CHAVES[id] = F12_CHAVES[id] || {};
+      /* Uma chave identifica UMA intenção de UMA operação.
+         Salvar produto e lançar estoque acontecem no mesmo modal,
+         mas são duas transações diferentes e precisam de chaves
+         diferentes. O mesmo botão clicado duas vezes continua
+         usando a mesma chave da sua operação. */
+      var chave = String(operacao || 'geral');
+      if (!F12_CHAVES[id][chave]) F12_CHAVES[id][chave] = f12_uuid();
+      return F12_CHAVES[id][chave];
     } catch (e) { return null; }
   }
 
@@ -12834,7 +12810,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
     var modalAntigo = modal;
     modal = function () {
       var id = modalAntigo.apply(this, arguments);
-      try { F12_CHAVES[id] = f12_uuid(); } catch (e) {}
+      try { F12_CHAVES[id] = {}; } catch (e) {}
       return id;
     };
     try { window.modal = modal; } catch (e) {}
@@ -12871,7 +12847,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
       try {
         var por = ONDE[funcao];
         if (por) {
-          var k = f12_chaveAtual();
+          var k = f12_chaveAtual(funcao);
           if (k) { por(argumentos, k); }
         }
       } catch (e) {}
