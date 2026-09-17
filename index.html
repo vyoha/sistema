@@ -13912,7 +13912,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
    vazio ou 404, NAO considera defasado e nao bloqueia nada.
    =============================================================== */
 (function () {
-  var F22_VERSAO = "2026-08-27-h";
+  var F22_VERSAO = "2026-09-17-a";
   var F22 = { versao: F22_VERSAO, servidor: null, defasada: false, ultima: null };
 
   function f22_url() {
@@ -17213,4 +17213,49 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
   } catch (e) {}
 })();
 
+</script>
+
+ 
+<!-- ===== FASE 43 · cadastro de venda: parcelas 1x-24x + preco unitario editavel ===== -->
+<script>
+(function () {
+  "use strict";
+  if (window.__f43) return;
+  window.__f43 = true;
+  try { document.documentElement.setAttribute("data-f43", "ativa"); } catch (e) {}
+  function ajustarParcelas(sel) {
+    if (!sel || sel.__f43) return;
+    var atual = parseInt(sel.value || "12", 10);
+    if (!(atual >= 1 && atual <= 24)) atual = 12;
+    var html = "";
+    for (var n = 1; n <= 24; n++) html += '<option value="' + n + '"' + (n === atual ? " selected" : "") + ">" + n + "x</option>";
+    sel.innerHTML = html; sel.value = String(atual); sel.__f43 = true;
+  }
+  function temDraft(){ return (typeof draft !== "undefined") && draft && Array.isArray(draft.itens); }
+  function injetarPreco() {
+    if (!temDraft()) return;
+    var botoes = document.querySelectorAll('button[onclick^="delItem("]');
+    for (var b = 0; b < botoes.length; b++) {
+      var btn = botoes[b], tr = btn.closest ? btn.closest("tr") : null;
+      if (!tr || tr.__f43) continue;
+      var mm = (btn.getAttribute("onclick") || "").match(/delItem\((\d+)\)/); if (!mm) continue;
+      var ix = parseInt(mm[1], 10), it = draft.itens[ix]; if (!it) continue;
+      var cells = tr.querySelectorAll("td"), cel = cells[1];
+      if (cel) cel.innerHTML = it.qtd + ' &times; R$ <input type="number" step="0.01" min="0" value="' + Number(it.preco || 0).toFixed(2) + '" class="f43-preco" data-ix="' + ix + '" style="width:92px;padding:4px 6px;border:1px solid rgba(0,0,0,.2);border-radius:6px;font-size:14px;text-align:right;background:var(--card,#fff);color:inherit">';
+      tr.__f43 = true;
+    }
+  }
+  document.addEventListener("change", function (ev) {
+    var el = ev.target;
+    if (!el || !el.classList || !el.classList.contains("f43-preco")) return;
+    if (!temDraft()) return;
+    var ix = parseInt(el.getAttribute("data-ix"), 10); if (!draft.itens[ix]) return;
+    var val = Number(el.value); if (!isFinite(val) || val < 0) val = 0;
+    draft.itens[ix].preco = val;
+    try { if (typeof calc === "function") calc(); } catch (e) {}
+  }, true);
+  function passe(){ try { var s = document.querySelectorAll("#d-parc"); for (var i=0;i<s.length;i++) ajustarParcelas(s[i]); injetarPreco(); } catch(e){} }
+  try { var mo = new MutationObserver(passe); mo.observe(document.body, { childList: true, subtree: true }); } catch (e) {}
+  passe();
+})();
 </script>
