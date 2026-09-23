@@ -3601,7 +3601,7 @@ function fecharVenda() {
     var nome = v("nv-nome"), cpf = dig(v("nv-cpf")), tel = dig(v("nv-tel"));
     if (nome.length < 3) return bad("Informe o nome completo do cliente.");
     if (cpf.length !== 11) return bad("Informe um CPF válido (11 dígitos).");
-    if (tel.length < 10) return bad("Informe o telefone com DDD.");
+    
     var dup = Q("customers").filter(function (c) { return dig(c.cpf) === cpf; })[0];
     if (dup) {
       draft.customer_id = dup.id;
@@ -4013,7 +4013,7 @@ function salvarCliente(id, depoisVenda) {
   function bad(m) { err.innerHTML = "<span style='width:17px'>" + ICON.alert + "</span><div>" + m + "</div>"; err.classList.remove("hidden"); }
   if (nome.length < 3) return bad("Informe o nome completo.");
   if (cpf.length !== 11) return bad("CPF deve ter 11 dígitos.");
-  if (tel.length < 10) return bad("Telefone inválido — inclua o DDD.");
+  
   if (Q("customers").filter(function (c) { return dig(c.cpf) === cpf && c.id !== id; }).length) return bad("Já existe um cliente com este CPF nesta empresa.");
   var dados = {
     nome: nome, cpf: cpf, tel: tel, email: v("k-mail"), nascimento: v("k-nasc"), endereco: v("k-end"),
@@ -10896,7 +10896,7 @@ var estoqueDesejado = Math.max(0, Math.round(nv("p-est")));
 
     if (nome.length < 3) return bad("Informe o nome completo.");
     if (cpf.length !== 11) return bad("CPF deve ter 11 dígitos.");
-    if (tel.length < 10) return bad("Telefone inválido — inclua o DDD.");
+    
 
     var dados = {
       nome: nome, cpf: cpf, tel: tel, email: v("k-mail"), nascimento: v("k-nasc"),
@@ -11288,7 +11288,7 @@ var estoqueDesejado = Math.max(0, Math.round(nv("p-est")));
 
     if (nome.length < 3) return bad("Informe o nome completo do cliente.");
     if (cpf.length !== 11) return bad("Informe um CPF válido (11 dígitos).");
-    if (tel.length < 10) return bad("Informe o telefone com DDD.");
+    
 
     /* já existe? vincula. O servidor responde sim ou não, sem
        revelar de quem é — inclusive se for cliente de outro
@@ -14830,7 +14830,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 
   function f26_faltando() {
     var falta = [];
-    OBRIGATORIOS.forEach(function (o) { if (!vv(o[0])) { falta.push(o[1]); } });
+    /* contato/analise nao obrigatorios */
     return falta;
   }
 
@@ -15294,7 +15294,7 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
 
   function f27_faltando() {
     var falta = [];
-    OBRIGATORIOS.forEach(function (o) { if (!vv(o[0])) { falta.push(o[1]); } });
+    /* contato/analise nao obrigatorios */
     return falta;
   }
 
@@ -17258,4 +17258,8 @@ try { document.documentElement.setAttribute("data-f7e", "ativa"); } catch (e) {}
   try { var mo = new MutationObserver(passe); mo.observe(document.body, { childList: true, subtree: true }); } catch (e) {}
   passe();
 })();
+</script>
+
+<script>/* VYOHA - trava anti-duplo-clique (salvar cliente / fechar venda) */
+(function(){if(window.__trava1x)return;window.__trava1x=true;function w(n){var f=window[n];if(typeof f!=="function")return;var L=false;window[n]=function(){if(L)return;L=true;var r;try{r=f.apply(this,arguments);}catch(e){L=false;throw e;}Promise.resolve(r).then(function(){L=false;},function(){L=false;});return r;};}w("salvarCliente");w("fecharVenda");})();
 </script>
