@@ -155,6 +155,8 @@ var RASCUNHO = (function () {
 })();
 var ANEXOS = {};
 var LOJA = null;
+var CATALOGO = [];        /* [{categoria, nome, parcela}] vindo do servidor */
+var PEDIDO_SEL = null;    /* produto escolhido pelo cliente */
 
 function el(id) { return document.getElementById(id); }
 function esc(s) {
@@ -222,7 +224,7 @@ function pintarFormulario() {
 
     '<div style="margin-bottom:16px"><button class="btn" onclick="pintarAcompanhar()">Já enviei — quero acompanhar</button></div>' +
     '<div class="aviso">Preencha com calma e confira antes de enviar: <b>o formulário só pode ser enviado uma vez</b>. ' +
-    "<b>Todas as informações são obrigatórias</b>, menos o último campo. Se faltar alguma, a análise trava e a visita atrasa.</div>" +
+    "A maior parte é obrigatória — as <b>referências</b> e o último campo são opcionais, mas as referências ajudam muito na análise.</div>" +
 
     '<h2>Quem é você</h2>' +
     '<div class="campo"><label>Nome completo <span class="rq">*</span></label><input id="f-nome" autocomplete="name"></div>' +
@@ -272,38 +274,34 @@ function pintarFormulario() {
     '<div class="campo"><label>Renda da casa somada (R$) <span class="rq">*</span></label><input id="f-renda-casa" inputmode="decimal" placeholder="0,00">' +
       '<div class="hint">Some tudo que entra por mês na casa, contando outras pessoas.</div></div>' +
 
-    "<h2>Referências</h2>" +
-    '<div class="aviso">Precisamos de <b>três contatos de pessoas próximas</b> e do endereço de um parente. ' +
-    "Isso é o que mais pesa na análise.</div>" +
-    '<div class="campo"><label>Endereço de um parente <span class="rq">*</span></label><input id="f-end-parente" placeholder="Rua, número, bairro, cidade"></div>' +
+    "<h2>Referências <span class=\"hint\" style=\"display:inline;font-weight:400\">— opcional, mas ajuda muito</span></h2>" +
+    '<div class="aviso">Se puder, informe <b>contatos de pessoas próximas</b> e o endereço de um parente. ' +
+    "Não é obrigatório, mas é o que mais ajuda a aprovar o crédito mais rápido.</div>" +
+    '<div class="campo"><label>Endereço de um parente</label><input id="f-end-parente" placeholder="Rua, número, bairro, cidade"></div>' +
     '<div class="dupla">' +
-      '<div class="campo"><label>Contato 1 — nome e parentesco <span class="rq">*</span></label><input id="f-ref-n1" placeholder="Ex.: Maria, irmã"></div>' +
-      '<div class="campo"><label>Telefone do contato 1 <span class="rq">*</span></label><input id="f-ref-t1" inputmode="tel" oninput="mascaraFone(this)"></div>' +
+      '<div class="campo"><label>Contato 1 — nome e parentesco</label><input id="f-ref-n1" placeholder="Ex.: Maria, irmã"></div>' +
+      '<div class="campo"><label>Telefone do contato 1</label><input id="f-ref-t1" inputmode="tel" oninput="mascaraFone(this)"></div>' +
     "</div>" +
     '<div class="dupla">' +
-      '<div class="campo"><label>Contato 2 — nome e parentesco <span class="rq">*</span></label><input id="f-ref-n2"></div>' +
-      '<div class="campo"><label>Telefone do contato 2 <span class="rq">*</span></label><input id="f-ref-t2" inputmode="tel" oninput="mascaraFone(this)"></div>' +
+      '<div class="campo"><label>Contato 2 — nome e parentesco</label><input id="f-ref-n2"></div>' +
+      '<div class="campo"><label>Telefone do contato 2</label><input id="f-ref-t2" inputmode="tel" oninput="mascaraFone(this)"></div>' +
     "</div>" +
     '<div class="dupla">' +
-      '<div class="campo"><label>Contato 3 — nome e parentesco <span class="rq">*</span></label><input id="f-ref-n3"></div>' +
-      '<div class="campo"><label>Telefone do contato 3 <span class="rq">*</span></label><input id="f-ref-t3" inputmode="tel" oninput="mascaraFone(this)"></div>' +
+      '<div class="campo"><label>Contato 3 — nome e parentesco</label><input id="f-ref-n3"></div>' +
+      '<div class="campo"><label>Telefone do contato 3</label><input id="f-ref-t3" inputmode="tel" oninput="mascaraFone(this)"></div>' +
     "</div>" +
 
     "<h2>O que você quer levar</h2>" +
-    '<div class="campo"><label>Produto desejado <span class="rq">*</span></label><input id="f-pedido" placeholder="Ex.: televisão"></div>' +
-    '<div class="dupla">' +
-      '<div class="campo"><label>Em quantas vezes <span class="rq">*</span></label>' +
-        '<select id="f-vezes" onchange="somarPedido()"><option value="">Escolha</option>' +
-        [3, 4, 5, 6, 8, 10, 12, 15, 18, 20, 24].map(function (n) { return "<option>" + n + "x</option>"; }).join("") +
-        "</select></div>" +
-      '<div class="campo"><label>Valor de cada parcela (R$) <span class="rq">*</span></label>' +
-        '<input id="f-parcela" inputmode="decimal" placeholder="0,00" oninput="somarPedido()"></div>' +
-    "</div>" +
-    '<div class="campo" id="f-total-caixa" style="display:none"><div class="aviso" id="f-total"></div></div>' +
+    '<div class="aviso">Escolha a <b>categoria</b> e depois o <b>modelo</b>. O valor da parcela aparece sozinho — são sempre <b>12 vezes</b>.</div>' +
+    '<div class="campo"><label>Categoria <span class="rq">*</span></label>' +
+      '<select id="f-categoria" onchange="escolherCategoria()"><option value="">Carregando os produtos…</option></select></div>' +
+    '<div class="campo"><label>Modelo <span class="rq">*</span></label>' +
+      '<select id="f-modelo" onchange="escolherModelo()" disabled><option value="">Escolha a categoria primeiro</option></select></div>' +
+    '<div class="campo" id="f-parcela-caixa" style="display:none"><div class="aviso ok" id="f-parcela-aviso"></div></div>' +
     '<div class="campo"><label>Melhor dia para pagar <span class="rq">*</span></label>' +
       '<select id="f-dia"><option value="">Escolha</option>' +
       [5, 10, 15, 20, 25, 30].map(function (d) { return "<option>" + d + "</option>"; }).join("") + "</select>" +
-      '<div class="hint">O vendedor confirma tudo isso na visita — aqui é só para ele já chegar sabendo.</div></div>' +
+      '<div class="hint">São 12 parcelas fixas. O vendedor confirma tudo na visita — aqui é só para ele já chegar sabendo.</div></div>' +
     '<div class="campo"><label>Quer contar mais alguma coisa? <span class="hint" style="display:inline">— único campo opcional</span></label><textarea id="f-obs" placeholder="Opcional"></textarea></div>' +
 
     "<h2>Documentos</h2>" +
@@ -320,6 +318,8 @@ function pintarFormulario() {
     "para analisar o seu crédito e entrar em contato.</div>" +
 
     "</div></div>";
+
+  carregarCatalogo();
 }
 function caixaAnexo(tipo, titulo, ajuda) {
   return '<div class="anexo" id="ax-' + tipo + '">' +
@@ -381,14 +381,55 @@ function comoNumero(t) {
   return isNaN(n) ? 0 : n;
 }
 
-/* mostra a conta pronta, para a pessoa ver no que está se metendo */
-function somarPedido() {
-  var vezes = parseInt(String(v("f-vezes")).replace(/\D/g, ""), 10) || 0;
-  var parcela = comoNumero(v("f-parcela"));
-  var caixa = el("f-total-caixa"), texto = el("f-total");
-  if (!caixa) return;
-  if (!vezes || !parcela) { caixa.style.display = "none"; return; }
-  texto.innerHTML = "<b>" + vezes + "x de " + dinheiro(parcela) + "</b> — total de <b>" + dinheiro(vezes * parcela) + "</b>.";
+/* ---------------- catálogo da loja (categoria -> modelo -> parcela) ----------------
+   O cliente não digita valor nem número de vezes: escolhe a categoria, depois o
+   modelo, e a parcela (preço ÷ 12) aparece. São sempre 12 vezes. O total do
+   produto NUNCA é mostrado — só a parcela. */
+var PARCELAS_FIXAS = 12;
+function carregarCatalogo() {
+  var selCat = el("f-categoria");
+  pedir("/rest/v1/rpc/formulario_produtos", { p_codigo: CODIGO })
+    .then(function (x) {
+      CATALOGO = (x.ok && Array.isArray(x.j)) ? x.j : [];
+      if (!selCat) return;
+      if (!CATALOGO.length) {
+        selCat.innerHTML = '<option value="">Nenhum produto disponível — fale com a loja</option>';
+        return;
+      }
+      var cats = [];
+      CATALOGO.forEach(function (p) { if (cats.indexOf(p.categoria) < 0) cats.push(p.categoria); });
+      cats.sort();
+      selCat.innerHTML = '<option value="">Escolha a categoria</option>' +
+        cats.map(function (c) { return '<option value="' + esc(c) + '">' + esc(c) + "</option>"; }).join("");
+    })
+    .catch(function () {
+      if (selCat) selCat.innerHTML = '<option value="">Não foi possível carregar os produtos</option>';
+    });
+}
+function escolherCategoria() {
+  var cat = v("f-categoria"), selMod = el("f-modelo");
+  PEDIDO_SEL = null;
+  el("f-parcela-caixa").style.display = "none";
+  if (!cat) {
+    selMod.disabled = true;
+    selMod.innerHTML = '<option value="">Escolha a categoria primeiro</option>';
+    return;
+  }
+  var modelos = CATALOGO.filter(function (p) { return p.categoria === cat; });
+  selMod.disabled = false;
+  selMod.innerHTML = '<option value="">Escolha o modelo</option>' +
+    modelos.map(function (p, i) { return '<option value="' + i + '">' + esc(p.nome) + "</option>"; }).join("");
+  /* o value é o índice DENTRO da categoria, então remonto a lista filtrada aqui */
+  selMod.__modelos = modelos;
+}
+function escolherModelo() {
+  var selMod = el("f-modelo"), idx = v("f-modelo");
+  var lista = selMod.__modelos || [];
+  var p = idx === "" ? null : lista[parseInt(idx, 10)];
+  PEDIDO_SEL = p || null;
+  var caixa = el("f-parcela-caixa"), aviso = el("f-parcela-aviso");
+  if (!p) { caixa.style.display = "none"; return; }
+  aviso.innerHTML = "<b>" + PARCELAS_FIXAS + "x de " + dinheiro(p.parcela) + "</b> — " + esc(p.nome) + ".";
   caixa.style.display = "block";
 }
 function dinheiro(n) {
@@ -476,23 +517,22 @@ function enviar() {
   if (rendaCasa <= 0) return ruim("Informe a renda somada da casa.", "f-renda-casa");
   if (rendaCasa < renda) return ruim("A renda da casa não pode ser menor que a sua. Some tudo que entra por mês.", "f-renda-casa");
 
-  /* REFERÊNCIAS */
-  if (v("f-end-parente").length < 8) return ruim("O endereço de um parente é obrigatório — com rua, número e bairro.", "f-end-parente");
+  /* REFERÊNCIAS (opcionais — só validamos o que a pessoa preencher) */
   var contatos = [], vistos = [dig(v("f-fone1")), dig(v("f-fone2"))];
   for (var i = 1; i <= 3; i++) {
     var n = v("f-ref-n" + i), t = v("f-ref-t" + i), d = dig(t);
-    if (n.length < 3) return ruim("Informe o nome e o parentesco do contato " + i + ".", "f-ref-n" + i);
-    if (!foneValido(t)) return ruim("O telefone do contato " + i + " não parece válido.", "f-ref-t" + i);
-    if (vistos.indexOf(d) >= 0) return ruim("O telefone do contato " + i + " já foi usado. Precisam ser três pessoas diferentes.", "f-ref-t" + i);
-    vistos.push(d);
+    if (!n && !t) continue;                 // contato em branco: tudo bem
+    if (t && !foneValido(t)) return ruim("O telefone do contato " + i + " não parece válido. Deixe em branco ou corrija.", "f-ref-t" + i);
+    if (d && vistos.indexOf(d) >= 0) return ruim("O telefone do contato " + i + " já foi usado. Use outro número ou deixe em branco.", "f-ref-t" + i);
+    if (d) vistos.push(d);
     contatos.push({ nome: n, telefone: d });
   }
 
-  /* O PEDIDO */
-  if (!v("f-pedido")) return ruim("Diga o que você quer levar.", "f-pedido");
-  if (!v("f-vezes")) return ruim("Diga em quantas vezes você quer pagar.", "f-vezes");
-  var parcela = comoNumero(v("f-parcela"));
-  if (parcela <= 0) return ruim("Informe o valor de cada parcela.", "f-parcela");
+  /* O PEDIDO (categoria -> modelo -> parcela; 12x fixas) */
+  if (!v("f-categoria")) return ruim("Escolha a categoria do produto.", "f-categoria");
+  if (!PEDIDO_SEL) return ruim("Escolha o modelo do produto.", "f-modelo");
+  var parcela = comoNumero(PEDIDO_SEL.parcela);
+  if (parcela <= 0) return ruim("Não consegui ler o valor desse produto. Escolha outro modelo ou fale com a loja.", "f-modelo");
   if (!v("f-dia")) return ruim("Escolha o melhor dia para pagar.", "f-dia");
 
   /* DOCUMENTOS */
@@ -515,10 +555,11 @@ function enviar() {
     renda: comoNumero(v("f-renda")), pessoas_trabalhando: v("f-quantos"),
     renda_casa: comoNumero(v("f-renda-casa")),
     endereco_parente: v("f-end-parente"), contatos: contatos,
-    pedido: v("f-pedido"),
-    parcelas: parseInt(String(v("f-vezes")).replace(/\D/g, ""), 10) || 0,
-    parcela_desejada: comoNumero(v("f-parcela")),
-    valor_total: (parseInt(String(v("f-vezes")).replace(/\D/g, ""), 10) || 0) * comoNumero(v("f-parcela")),
+    pedido: PEDIDO_SEL ? PEDIDO_SEL.nome : "",
+    categoria_pedido: PEDIDO_SEL ? PEDIDO_SEL.categoria : "",
+    parcelas: PARCELAS_FIXAS,
+    parcela_desejada: parcela,
+    valor_total: Math.round(parcela * PARCELAS_FIXAS * 100) / 100,
     dia_pagamento: v("f-dia"), observacao: v("f-obs")
   };
 
