@@ -11424,7 +11424,12 @@ var estoqueDesejado = Math.max(0, Math.round(nv("p-est")));
   /* cancelar também é transação: devolve estoque, cancela as
      parcelas em aberto e estorna o caixa */
   window.confirmarCancelamento = function (id) {
-    var motivo = v("cn-motivo"), obs = v("cn-obs");
+    var motivo = v("cv-motivo"), obs = v("cv-obs");
+    if (motivo === "Outro motivo") {
+      var detalhe = v("cv-outro");
+      if (!detalhe || detalhe.length < 4) return toast("Descreva o motivo do cancelamento.", "err");
+      motivo = detalhe;
+    }
     if (!motivo) return toast("Escolha o motivo do cancelamento.", "err");
 
     Dados.chamar("cancelar_venda", {
