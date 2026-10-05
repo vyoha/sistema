@@ -176,8 +176,8 @@ svg{display:block}
 .seg button.on{background:#fff;color:var(--brand);box-shadow:var(--sh);font-weight:640}
 
 .grid{display:grid;gap:18px}
-.c2{grid-template-columns:repeat(2,1fr)}.c3{grid-template-columns:repeat(3,1fr)}
-.c4{grid-template-columns:repeat(4,1fr)}
+.c2{grid-template-columns:repeat(2,minmax(0,1fr))}.c3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.c4{grid-template-columns:repeat(4,minmax(0,1fr))}
 .c21{grid-template-columns:1.85fr 1fr}.c12{grid-template-columns:1fr 1.85fr}
 @media(max-width:1120px){.c4{grid-template-columns:repeat(2,1fr)}.c3,.c21,.c12{grid-template-columns:1fr}}
 @media(max-width:680px){.c2,.c4{grid-template-columns:1fr}}
@@ -3327,6 +3327,7 @@ function pg_vendas() {
     lista = lista.filter(function (s) { return String(s.numero).indexOf(t) >= 0 || cliNome(s.customer_id).toLowerCase().indexOf(t) >= 0; });
   }
   if (UI.vSt) lista = lista.filter(function (s) { return statusVenda(s) === UI.vSt; });
+  else lista = lista.filter(function (s) { return statusVenda(s) !== "cancelada"; });
   lista = srt(lista, function (s) { return s.data; }, true);
   var abertas = todas.filter(function (s) { var st = statusVenda(s); return st === "ativa" || st === "atrasada"; });
 
@@ -3345,7 +3346,7 @@ function pg_vendas() {
     "</div>";
   h += '<div class="filters">' +
     '<div class="srch"><span class="i">' + ICON.search + '</span><input id="f-v" placeholder="Cliente ou número da venda" value="' + esc(UI.vBusca) + '" oninput="UI.vBusca=this.value;deb()"></div>' +
-    '<div class="seg">' + [["", "Todas"], ["ativa", "Ativas"], ["atrasada", "Atrasadas"], ["quitada", "Quitadas"]].map(function (o) {
+    '<div class="seg">' + [["", "Todas"], ["ativa", "Ativas"], ["atrasada", "Atrasadas"], ["quitada", "Quitadas"], ["cancelada", "Canceladas"]].map(function (o) {
       return '<button class="' + (UI.vSt === o[0] ? "on" : "") + '" onclick="UI.vSt=\'' + o[0] + "';ir('vendas')\">" + o[1] + "</button>";
     }).join("") + "</div>" +
     (UI.vBusca ? '<span class="sm mut">busca em todas as vendas</span>' : "") +
